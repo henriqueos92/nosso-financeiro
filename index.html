@@ -1,0 +1,1255 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Financeiro — Casal</title>
+<link rel="icon" href="data:,">
+<style>
+  html,body { margin:0; padding:0; background:#0d0f11; }
+  @keyframes spin { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
+  body { display:flex; justify-content:center; padding: 18px 0 40px; min-height:100vh; }
+</style>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useMemo } = React;
+
+/* ============================================================
+   TOKENS
+   Verde petróleo #16283D · Sage var(--label) · Champagne var(--soft)
+   Coral #A13D46 (despesa) · Grafite var(--ink-soft) · Creme #FFFFFF
+   Display: Fraunces (serif, "ledger" personality)
+   Body: Inter · Numeric: IBM Plex Mono
+============================================================ */
+
+const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600;8..60,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');`;
+
+const THEME_CSS = `
+.fin-app[data-theme="light"] {
+  --bg: #EEF0EF; --card: #FFFFFF; --border: #E1E4E8; --border-2: #EFEAE0;
+  --ink: #1C2126; --ink-soft: #33322F; --muted: #6b6a63; --muted-2: #8a897f; --label: #7C8591;
+  --soft: #EDF1F5; --shadow-1: rgba(16,24,40,0.03); --shadow-2: rgba(16,40,64,0.25);
+}
+.fin-app[data-theme="dark"] {
+  --bg: #10151C; --card: #1B222C; --border: #2A3340; --border-2: #2A3340;
+  --ink: #EDEFF2; --ink-soft: #D7DCE2; --muted: #9AA4B0; --muted-2: #8792A0; --label: #8FA0B3;
+  --soft: #1E2A38; --shadow-1: rgba(0,0,0,0.2); --shadow-2: rgba(0,0,0,0.45);
+}
+.fin-app { transition: background-color .2s ease; }
+.fin-app input, .fin-app select { color-scheme: light; }
+.fin-app[data-theme="dark"] input, .fin-app[data-theme="dark"] select { color-scheme: dark; }
+`;
+
+const THEME_KEY = "financeiro-casal:theme";
+
+const BANKS = {
+  nubank: { name: "Nubank", color: "#820AD1", letter: "N" },
+  itau: { name: "Itaú", color: "#EC7000", letter: "I" },
+  caixa: { name: "Caixa", color: "#1B5FAB", letter: "C" },
+  inter: { name: "Banco Inter", color: "#FF7A00", letter: "B" },
+  bb: { name: "Banco do Brasil", color: "#F9D616", letter: "B" },
+};
+
+const DESPESA_CATS = ["Alimentação","Assinaturas e serviço","Bares e restaurante","Casa","Compras","Cuidados pessoais","Dívidas e empréstimo","Educação","Família e filhos","Impostos e taxas","Investimentos","Lazer e hobbies","Mercado","Outros","Pet","Presentes e doação","Roupas","Saúde","Trabalho","Transporte","Viagem"];
+const RECEITA_CATS = ["Empréstimos","Investimentos","Outras receitas","Salário"];
+
+const STORAGE_KEY = "financeiro-casal:v1";
+
+const uid = () => Math.random().toString(36).slice(2, 10);
+const brl = (n) => (n < 0 ? "-" : "") + "R$ " + Math.abs(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const monthLabel = (d) => d.toLocaleDateString("pt-BR", { month: "long", year: "numeric" }).replace(/^\w/, (c) => c.toUpperCase());
+
+function seedData() {
+  const now = new Date();
+  const iso = (day) => new Date(now.getFullYear(), now.getMonth(), day).toISOString().slice(0, 10);
+  return {
+    profile: { name: "Dayane", partnerName: "Henrique", email: "dayane@exemplo.com", birthdate: "", photo: "" },
+    accounts: [
+      { id: uid(), name: "NuConta", bank: "nubank", balance: 3245.8 },
+      { id: uid(), name: "Itaú Conta Corrente", bank: "itau", balance: 1180.32 },
+      { id: uid(), name: "Poupança Caixa", bank: "caixa", balance: 6200.0 },
+    ],
+    cards: [
+      { id: uid(), name: "Nubank Roxinho", bank: "nubank", limit: 5000, closingDay: 3, dueDay: 10, invoice: 842.5 },
+      { id: uid(), name: "Itaú Click", bank: "itau", limit: 3000, closingDay: 20, dueDay: 27, invoice: 316.9 },
+    ],
+    transactions: [
+      { id: uid(), date: iso(2), desc: "Salário — Dayane", value: 4200, type: "receita", category: "Salário", accountId: null, status: "resolvido", fixed: true, tag: "" },
+      { id: uid(), date: iso(3), desc: "Aluguel", value: -1450, type: "despesa", category: "Casa", accountId: null, status: "resolvido", fixed: true, tag: "casa" },
+      { id: uid(), date: iso(5), desc: "Supermercado Extra", value: -389.2, type: "despesa", category: "Mercado", accountId: null, status: "resolvido", fixed: false, tag: "" },
+      { id: uid(), date: iso(6), desc: "Academia", value: -99.9, type: "despesa", category: "Cuidados pessoais", accountId: null, status: "resolvido", fixed: true, tag: "" },
+      { id: uid(), date: iso(8), desc: "iFood", value: -63.5, type: "despesa", category: "Bares e restaurante", accountId: null, status: "pendente", fixed: false, tag: "" },
+      { id: uid(), date: iso(10), desc: "Netflix", value: -39.9, type: "despesa", category: "Assinaturas e serviço", accountId: null, status: "resolvido", fixed: true, tag: "" },
+    ],
+    detected: [
+      { id: uid(), bank: "nubank", desc: "Compra no crédito — Ifd*Ifood", value: -70.0, date: todayISO(), time: "12:41" },
+      { id: uid(), bank: "itau", desc: "Pix recebido — Henrique", value: 250.0, date: todayISO(), time: "09:03" },
+      { id: uid(), bank: "caixa", desc: "Débito automático — Sanepar", value: -118.4, date: todayISO(), time: "07:15" },
+    ],
+    tags: ["casa"],
+    limits: [
+      { id: uid(), category: "Alimentação", value: 700, repeats: true, period: "Mensal" },
+      { id: uid(), category: "Lazer e hobbies", value: 300, repeats: true, period: "Mensal" },
+      { id: uid(), category: "Transporte", value: 250, repeats: false, period: "Este mês" },
+    ],
+    notifications: [
+      { id: uid(), text: "Sua fatura Nubank fecha em 3 dias.", read: false },
+      { id: uid(), text: "Henrique adicionou um lançamento em Mercado.", read: false },
+    ],
+  };
+}
+
+/* ============================================================
+   ARMAZENAMENTO COMPARTILHADO (jsonbin.io — plano grátis)
+   1. Crie uma conta em https://jsonbin.io
+   2. Crie um "Bin" novo com o conteúdo {} e copie o Bin ID
+   3. Em "API Keys", copie sua X-Master-Key
+   4. Cole os dois valores abaixo
+============================================================ */
+const JSONBIN_ID = "6a7d0166da38895dfedce2f3";
+const JSONBIN_KEY = "$2a$10$DiRKf0xhBDltF94YODaw7.MtLOXK7Bp8DyBSAZUi30zETV8zWQ2F2";
+const JSONBIN_URL = `https://api.jsonbin.io/v3/b/${JSONBIN_ID}`;
+
+async function loadData() {
+  try {
+    const res = await fetch(`${JSONBIN_URL}/latest`, {
+      headers: { "X-Master-Key": JSONBIN_KEY },
+    });
+    if (res.ok) {
+      const json = await res.json();
+      if (json && json.record && json.record.profile) return json.record;
+    }
+  } catch (e) { console.error("Falha ao carregar dados da nuvem:", e); }
+  const seed = seedData();
+  await saveData(seed);
+  return seed;
+}
+async function saveData(data) {
+  try {
+    await fetch(JSONBIN_URL, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "X-Master-Key": JSONBIN_KEY },
+      body: JSON.stringify(data),
+    });
+  } catch (e) { console.error("Falha ao salvar dados na nuvem:", e); }
+}
+
+/* ============================================================ ICONS (inline, no deps) */
+const Icon = ({ name, size = 22, color = "currentColor", style }) => {
+  const p = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: color, strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round", style };
+  switch (name) {
+    case "home": return <svg {...p}><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>;
+    case "list": return <svg {...p}><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>;
+    case "chart": return <svg {...p}><path d="M4 19V9M12 19V4M20 19v-6"/></svg>;
+    case "target": return <svg {...p}><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="0.6" fill={color}/></svg>;
+    case "user": return <svg {...p}><circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 5-6 8-6s6.5 2 8 6"/></svg>;
+    case "bell": return <svg {...p}><path d="M6 9a6 6 0 0112 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 004 0"/></svg>;
+    case "chevronL": return <svg {...p}><path d="M15 6l-6 6 6 6"/></svg>;
+    case "chevronR": return <svg {...p}><path d="M9 6l6 6-6 6"/></svg>;
+    case "dots": return <svg {...p}><circle cx="12" cy="5" r="1.4" fill={color}/><circle cx="12" cy="12" r="1.4" fill={color}/><circle cx="12" cy="19" r="1.4" fill={color}/></svg>;
+    case "x": return <svg {...p}><path d="M6 6l12 12M18 6L6 18"/></svg>;
+    case "search": return <svg {...p}><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>;
+    case "filter": return <svg {...p}><path d="M4 5h16M7 12h10M10 19h4"/></svg>;
+    case "plus": return <svg {...p}><path d="M12 5v14M5 12h14"/></svg>;
+    case "check": return <svg {...p}><path d="M4 12l5 5L20 6"/></svg>;
+    case "trash": return <svg {...p}><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>;
+    case "edit": return <svg {...p}><path d="M4 20l4-1 11-11-3-3L5 16l-1 4z"/></svg>;
+    case "wallet": return <svg {...p}><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M16 14h2"/></svg>;
+    case "card": return <svg {...p}><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/></svg>;
+    case "link": return <svg {...p}><path d="M9 15l6-6M8 12l-2 2a3 3 0 004 4l2-2M16 12l2-2a3 3 0 00-4-4l-2 2"/></svg>;
+    case "tag": return <svg {...p}><path d="M20 12l-8 8-9-9V4h7z"/><circle cx="7.5" cy="7.5" r="1" fill={color}/></svg>;
+    case "cal": return <svg {...p}><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>;
+    case "arrowUp": return <svg {...p}><path d="M12 19V5M6 11l6-6 6 6"/></svg>;
+    case "arrowDown": return <svg {...p}><path d="M12 5v14M18 13l-6 6-6-6"/></svg>;
+    case "sun": return <svg {...p}><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>;
+    case "moon": return <svg {...p}><path d="M20 14.5A8.5 8.5 0 1110 3.2a7 7 0 0010 11.3z"/></svg>;
+    case "refresh": return <svg {...p}><path d="M4 4v6h6M20 20v-6h-6"/><path d="M20 9A8 8 0 006 5.3M4 15a8 8 0 0014 3.7"/></svg>;
+    default: return null;
+  }
+};
+
+/* ============================================================ SMALL UI ATOMS */
+const BankBadge = ({ bank, size = 40 }) => {
+  const b = BANKS[bank] || { name: bank, color: "var(--ink-soft)", letter: "?" };
+  return (
+    <div style={{ width: size, height: size, borderRadius: size * 0.32, background: b.color, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Source Serif 4, serif", fontWeight: 600, fontSize: size * 0.42, flexShrink: 0 }}>
+      {b.letter}
+    </div>
+  );
+};
+
+const Card = ({ children, style, onClick }) => (
+  <div onClick={onClick} style={{ background: "var(--card)", borderRadius: 16, padding: 16, border: "1px solid var(--border)", boxShadow: "0 1px 2px var(--shadow-1), 0 10px 22px -18px var(--shadow-2)", ...style }}>
+    {children}
+  </div>
+);
+
+const Pill = ({ active, children, onClick }) => (
+  <button onClick={onClick} style={{
+    padding: "7px 14px", borderRadius: 999, fontFamily: "Inter", fontSize: 13, fontWeight: 600,
+    border: active ? "1.5px solid #16283D" : "1.5px solid var(--border)", background: active ? "#16283D" : "transparent",
+    color: active ? "#FFFFFF" : "var(--ink-soft)", cursor: "pointer", whiteSpace: "nowrap"
+  }}>{children}</button>
+);
+
+function MonthBar({ date, setDate, title }) {
+  const shift = (n) => setDate(new Date(date.getFullYear(), date.getMonth() + n, 1));
+  return (
+    <div style={{ padding: "18px 18px 10px" }}>
+      {title && <div style={{ fontFamily: "Inter", fontSize: 12, letterSpacing: 1, textTransform: "uppercase", color: "var(--label)", fontWeight: 700, marginBottom: 6 }}>{title}</div>}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <button onClick={() => shift(-1)} style={navBtn}><Icon name="chevronL" color="#16283D" /></button>
+        <div style={{ fontFamily: "Source Serif 4, serif", fontSize: 21, fontWeight: 600, color: "#16283D" }}>{monthLabel(date)}</div>
+        <button onClick={() => shift(1)} style={navBtn}><Icon name="chevronR" color="#16283D" /></button>
+      </div>
+    </div>
+  );
+}
+const navBtn = { width: 34, height: 34, borderRadius: 999, border: "none", background: "var(--soft)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" };
+
+function Sheet({ open, onClose, children, title }) {
+  if (!open) return null;
+  return (
+    <div style={{ position: "absolute", inset: 0, zIndex: 40 }}>
+      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(31,30,28,0.4)" }} />
+      <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, background: "var(--card)", borderRadius: "22px 22px 0 0", padding: "14px 18px 26px", maxHeight: "78%", overflowY: "auto", boxShadow: "0 -10px 30px rgba(0,0,0,0.35)" }}>
+        <div style={{ width: 40, height: 4, borderRadius: 4, background: "var(--border)", margin: "0 auto 14px" }} />
+        {title && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ fontFamily: "Source Serif 4, serif", fontSize: 19, fontWeight: 600, color: "#16283D" }}>{title}</div>
+          <button onClick={onClose} style={{ ...navBtn, background: "transparent" }}><Icon name="x" size={20} color="var(--ink-soft)" /></button>
+        </div>}
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontFamily: "Inter", fontSize: 12, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>{label}</div>
+      {children}
+    </div>
+  );
+}
+const inputStyle = { width: "100%", boxSizing: "border-box", padding: "11px 13px", borderRadius: 12, border: "1.5px solid var(--border)", background: "var(--card)", fontFamily: "Inter", fontSize: 14.5, color: "var(--ink-soft)", outline: "none" };
+
+/* ============================================================ SCREEN: INÍCIO */
+function Inicio({ data, patch, goManage, openNotif, setNotifOpen, onReload, syncing, lastSync }) {
+  const [detailFor, setDetailFor] = useState(null); // detected notification being reviewed
+  const [confirmDraft, setConfirmDraft] = useState(null);
+  const [listOpen, setListOpen] = useState(false);
+
+  const saldoGeral = data.accounts.reduce((s, a) => s + a.balance, 0);
+  const totalFaturas = data.cards.reduce((s, c) => s + c.invoice, 0);
+  const unread = data.notifications.filter(n => !n.read).length;
+
+  function startLancar(det) {
+    setConfirmDraft({
+      desc: det.desc, value: det.value, date: det.date,
+      type: det.value >= 0 ? "receita" : "despesa",
+      category: det.value >= 0 ? "Outras receitas" : "Outros",
+      accountId: data.accounts[0]?.id || null,
+    });
+    setDetailFor(null);
+  }
+  function confirmLancamento() {
+    const t = { id: uid(), status: "resolvido", fixed: false, tag: "", ...confirmDraft };
+    patch(d => ({
+      ...d,
+      transactions: [t, ...d.transactions],
+      detected: d.detected.filter(x => x.desc !== confirmDraft.__srcDesc),
+    }));
+    setConfirmDraft(null);
+  }
+
+  return (
+    <div style={{ paddingBottom: 100 }}>
+      {/* header */}
+      <div style={{ padding: "22px 18px 8px", display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ width: 46, height: 46, borderRadius: "50%", background: "#16283D", color: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Source Serif 4, serif", fontSize: 18, fontWeight: 600 }}>
+          {data.profile.name.slice(0,1)}
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontFamily: "Inter", fontSize: 12, color: "var(--label)", fontWeight: 600 }}>Bom dia,</div>
+          <div style={{ fontFamily: "Source Serif 4, serif", fontSize: 19, fontWeight: 600, color: "#16283D" }}>{data.profile.name}</div>
+        </div>
+        <button onClick={onReload} disabled={syncing} title="Recarregar lançamentos" style={{ ...navBtn, width: 40, height: 40, background: "var(--soft)" }}>
+          <Icon name="refresh" color="#16283D" size={18} style={syncing ? { animation: "spin 0.9s linear infinite" } : {}} />
+        </button>
+        <button onClick={() => setNotifOpen(true)} style={{ ...navBtn, width: 40, height: 40, background: "var(--soft)", position: "relative" }}>
+          <Icon name="bell" color="#16283D" size={19} />
+          {unread > 0 && <span style={{ position: "absolute", top: 4, right: 5, width: 8, height: 8, borderRadius: "50%", background: "#A13D46" }} />}
+        </button>
+      </div>
+      <div style={{ padding: "0 18px 4px", fontFamily: "Inter", fontSize: 11, color: "var(--muted-2)" }}>
+        {syncing ? "Sincronizando..." : `Atualizado às ${lastSync.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}`}
+      </div>
+
+      {/* lançamentos disponíveis */}
+      <div style={{ padding: "16px 18px 6px" }}>
+        <div style={{ fontFamily: "Inter", fontSize: 12, letterSpacing: 1, textTransform: "uppercase", color: "var(--label)", fontWeight: 700, marginBottom: 8 }}>
+          Lançamentos disponíveis {data.detected.length > 0 && `· ${data.detected.length}`}
+        </div>
+        {data.detected.length === 0 ? (
+          <Card><div style={{ fontFamily: "Inter", fontSize: 13.5, color: "var(--muted)" }}>Nenhum lançamento novo detectado por enquanto.</div></Card>
+        ) : (
+          <Card style={{ display: "flex", alignItems: "center", gap: 12, padding: 14 }}>
+            <div style={{ display: "flex" }}>
+              {[...new Set(data.detected.map(d => d.bank))].slice(0, 4).map((bank, i) => (
+                <div key={bank} style={{ marginLeft: i === 0 ? 0 : -12, border: "2px solid #FFFFFF", borderRadius: 12, position: "relative", zIndex: 10 - i }}>
+                  <BankBadge bank={bank} size={38} />
+                </div>
+              ))}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontFamily: "Inter", fontSize: 13.5, fontWeight: 700, color: "var(--ink)" }}>{data.detected.length} novo(s) detectado(s)</div>
+              <div style={{ fontFamily: "Inter", fontSize: 11.5, color: "var(--muted-2)" }}>{[...new Set(data.detected.map(d => BANKS[d.bank]?.name))].join(" · ")}</div>
+            </div>
+            <button onClick={() => setListOpen(true)} style={{ border: "1.5px solid #16283D", background: "transparent", color: "#16283D", borderRadius: 10, padding: "8px 14px", fontFamily: "Inter", fontSize: 12.5, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>Visualizar</button>
+          </Card>
+        )}
+      </div>
+
+      <Sheet open={listOpen} onClose={() => setListOpen(false)} title="Lançamentos detectados">
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {data.detected.map(det => (
+            <Card key={det.id} onClick={() => { setListOpen(false); setDetailFor(det); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, cursor: "pointer" }}>
+              <BankBadge bank={det.bank} size={36} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontFamily: "Inter", fontSize: 13.5, fontWeight: 600, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{det.desc}</div>
+                <div style={{ fontFamily: "IBM Plex Mono", fontSize: 12, color: "var(--muted-2)" }}>{BANKS[det.bank]?.name} · {det.time}</div>
+              </div>
+              <div style={{ fontFamily: "IBM Plex Mono", fontSize: 14, fontWeight: 600, color: det.value >= 0 ? "#1E7F63" : "#A13D46" }}>{brl(det.value)}</div>
+            </Card>
+          ))}
+        </div>
+      </Sheet>
+
+      {/* saldo geral */}
+      <div style={{ padding: "18px 18px 0" }}>
+        <Card style={{ background: "#16283D", color: "#FFFFFF" }}>
+          <div style={{ fontFamily: "Inter", fontSize: 12, color: "#AAB8C4", fontWeight: 600, marginBottom: 4 }}>Saldo geral</div>
+          <div style={{ fontFamily: "Source Serif 4, serif", fontSize: 30, fontWeight: 600 }}>{brl(saldoGeral)}</div>
+          <div style={{ marginTop: 8, height: 1, background: "repeating-linear-gradient(90deg,#3A5066 0 6px,transparent 6px 12px)" }} />
+        </Card>
+      </div>
+
+      {/* contas */}
+      <div style={{ padding: "16px 18px 0" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <div style={{ fontFamily: "Inter", fontSize: 12, letterSpacing: 1, textTransform: "uppercase", color: "var(--label)", fontWeight: 700 }}>Suas contas</div>
+          <button onClick={goManage} style={{ border: "none", background: "transparent", color: "#16283D", fontFamily: "Inter", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Gerenciar contas ›</button>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {data.accounts.map(a => (
+            <Card key={a.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: 12 }}>
+              <BankBadge bank={a.bank} size={36} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontFamily: "Inter", fontSize: 13.5, fontWeight: 600 }}>{a.name}</div>
+                <div style={{ fontFamily: "Inter", fontSize: 11.5, color: "var(--muted-2)" }}>{BANKS[a.bank]?.name}</div>
+              </div>
+              <div style={{ fontFamily: "IBM Plex Mono", fontSize: 14, fontWeight: 600, color: "var(--ink-soft)" }}>{brl(a.balance)}</div>
+            </Card>
+          ))}
+        </div>
+      </div>
+
+      {/* faturas */}
+      {data.cards.length > 0 && (
+        <div style={{ padding: "16px 18px 0" }}>
+          <Card style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--soft)" }}>
+            <div>
+              <div style={{ fontFamily: "Inter", fontSize: 12, color: "#3E5C76", fontWeight: 700 }}>Faturas em aberto ({data.cards.length})</div>
+              <div style={{ fontFamily: "Source Serif 4, serif", fontSize: 21, fontWeight: 600, color: "#16283D" }}>{brl(totalFaturas)}</div>
+            </div>
+            <Icon name="card" color="#16283D" size={26} />
+          </Card>
+        </div>
+      )}
+
+      <Sheet open={!!detailFor} onClose={() => setDetailFor(null)} title="Lançamento detectado">
+        {detailFor && (
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+              <BankBadge bank={detailFor.bank} size={44} />
+              <div>
+                <div style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 14.5 }}>{detailFor.desc}</div>
+                <div style={{ fontFamily: "Inter", fontSize: 12, color: "var(--muted-2)" }}>{BANKS[detailFor.bank]?.name} · {detailFor.date} às {detailFor.time}</div>
+              </div>
+            </div>
+            <div style={{ fontFamily: "IBM Plex Mono", fontSize: 26, fontWeight: 600, color: detailFor.value >= 0 ? "#1E7F63" : "#A13D46", marginBottom: 18 }}>{brl(detailFor.value)}</div>
+            <button onClick={() => startLancar({ ...detailFor, __srcDesc: detailFor.desc })} style={primaryBtn}>Lançar na despesa mensal</button>
+          </div>
+        )}
+      </Sheet>
+
+      <Sheet open={!!confirmDraft} onClose={() => setConfirmDraft(null)} title="Confirmar lançamento">
+        {confirmDraft && (
+          <div>
+            <Field label="Descrição"><input style={inputStyle} value={confirmDraft.desc} onChange={e => setConfirmDraft({ ...confirmDraft, desc: e.target.value })} /></Field>
+            <Field label="Valor"><input style={inputStyle} type="number" value={confirmDraft.value} onChange={e => setConfirmDraft({ ...confirmDraft, value: parseFloat(e.target.value) || 0 })} /></Field>
+            <Field label="Categoria">
+              <select style={inputStyle} value={confirmDraft.category} onChange={e => setConfirmDraft({ ...confirmDraft, category: e.target.value })}>
+                {(confirmDraft.type === "receita" ? RECEITA_CATS : DESPESA_CATS).map(c => <option key={c}>{c}</option>)}
+              </select>
+            </Field>
+            <Field label="Conta">
+              <select style={inputStyle} value={confirmDraft.accountId || ""} onChange={e => setConfirmDraft({ ...confirmDraft, accountId: e.target.value })}>
+                {data.accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </Field>
+            <button onClick={confirmLancamento} style={primaryBtn}>Confirmar lançamento</button>
+          </div>
+        )}
+      </Sheet>
+    </div>
+  );
+}
+const primaryBtn = { width: "100%", padding: "13px", borderRadius: 13, border: "none", background: "#16283D", color: "#FFFFFF", fontFamily: "Inter", fontWeight: 700, fontSize: 14.5, cursor: "pointer" };
+const secondaryBtn = { width: "100%", padding: "13px", borderRadius: 13, border: "1.5px solid #A13D46", background: "transparent", color: "#A13D46", fontFamily: "Inter", fontWeight: 700, fontSize: 14.5, cursor: "pointer" };
+
+/* ============================================================ SCREEN: LANÇAMENTOS (fluxo de caixa) */
+const blankNewTx = () => ({
+  desc: "", value: "", type: "despesa", category: DESPESA_CATS[0], accountId: "",
+  date: todayISO(), fixed: false, isInstallment: false, totalParcelas: 2, currentParcela: 1, tag: "",
+});
+
+function Lancamentos({ data, patch, date, setDate }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [mode, setMode] = useState("normal"); // normal | select | search | filter | period
+  const [selected, setSelected] = useState([]);
+  const [query, setQuery] = useState("");
+  const [filters, setFilters] = useState({ types: [], status: [], accounts: [], categories: [] });
+  const [period, setPeriod] = useState("mes");
+  const [newTxOpen, setNewTxOpen] = useState(false);
+  const [newTx, setNewTx] = useState(blankNewTx());
+
+  function saveNewTx() {
+    if (!newTx.desc || !newTx.value) return;
+    const totalVal = parseFloat(newTx.value);
+    if (!totalVal) return;
+    const accountId = newTx.accountId || data.accounts[0]?.id || null;
+
+    if (!newTx.isInstallment) {
+      const t = {
+        id: uid(), date: newTx.date, desc: newTx.desc,
+        value: newTx.type === "despesa" ? -Math.abs(totalVal) : Math.abs(totalVal),
+        type: newTx.type, category: newTx.category, accountId, status: "resolvido",
+        fixed: newTx.fixed, tag: newTx.tag || "",
+      };
+      patch(d => ({ ...d, transactions: [t, ...d.transactions] }));
+    } else {
+      const parcelas = Math.max(1, parseInt(newTx.totalParcelas) || 1);
+      const atual = Math.min(parcelas, Math.max(1, parseInt(newTx.currentParcela) || 1));
+      const valorParcela = totalVal / parcelas;
+      const groupId = uid();
+      const base = new Date(newTx.date + "T00:00:00");
+      const novas = [];
+      for (let i = 1; i <= parcelas; i++) {
+        const offset = i - atual;
+        const d2 = new Date(base.getFullYear(), base.getMonth() + offset, base.getDate());
+        novas.push({
+          id: uid(),
+          date: d2.toISOString().slice(0, 10),
+          desc: newTx.desc,
+          value: newTx.type === "despesa" ? -valorParcela : valorParcela,
+          type: newTx.type, category: newTx.category, accountId,
+          status: i <= atual ? "resolvido" : "pendente",
+          fixed: false, tag: newTx.tag || "",
+          installment: { groupId, current: i, total: parcelas },
+        });
+      }
+      patch(d => ({ ...d, transactions: [...novas, ...d.transactions] }));
+    }
+    setNewTxOpen(false);
+    setNewTx(blankNewTx());
+  }
+
+  const monthTx = useMemo(() => data.transactions.filter(t => {
+    const d = new Date(t.date);
+    return d.getFullYear() === date.getFullYear() && d.getMonth() === date.getMonth();
+  }), [data.transactions, date]);
+
+  const filtered = useMemo(() => monthTx.filter(t => {
+    if (query && !t.desc.toLowerCase().includes(query.toLowerCase())) return false;
+    const kindFilters = filters.types.filter(v => ["receita","despesa","transferencia"].includes(v));
+    if (kindFilters.length && !kindFilters.includes(t.type)) return false;
+    if (filters.types.includes("fixo") && !t.fixed) return false;
+    if (filters.types.includes("parcelado") && !t.installment) return false;
+    if (filters.status.length && !filters.status.includes(t.status)) return false;
+    if (filters.accounts.length && !filters.accounts.includes(t.accountId)) return false;
+    if (filters.categories.length && !filters.categories.includes(t.category)) return false;
+    return true;
+  }), [monthTx, query, filters]);
+
+  const grouped = useMemo(() => {
+    const g = {};
+    filtered.slice().sort((a,b)=>b.date.localeCompare(a.date)).forEach(t => { (g[t.date] ||= []).push(t); });
+    return Object.entries(g);
+  }, [filtered]);
+
+  const total = filtered.reduce((s,t)=>s+t.value,0);
+  const selTotal = data.transactions.filter(t=>selected.includes(t.id)).reduce((s,t)=>s+t.value,0);
+
+  function toggleSel(id) { setSelected(s => s.includes(id) ? s.filter(x=>x!==id) : [...s, id]); }
+  function deleteSelected() { patch(d => ({ ...d, transactions: d.transactions.filter(t=>!selected.includes(t.id)) })); setSelected([]); setMode("normal"); }
+  function allIds() { return filtered.map(t=>t.id); }
+
+  const allCats = [...DESPESA_CATS, ...RECEITA_CATS];
+
+  return (
+    <div style={{ paddingBottom: 100, position: "relative" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 18px 0" }}>
+        {mode === "select" ? (
+          <>
+            <button onClick={() => { setMode("normal"); setSelected([]); }} style={{ ...navBtn, background: "transparent" }}><Icon name="x" color="var(--ink-soft)" /></button>
+            <div style={{ fontFamily: "Inter", fontWeight: 700, fontSize: 14 }}>{selected.length} selecionado(s)</div>
+            <button onClick={() => setSelected(selected.length === allIds().length ? [] : allIds())} style={{ fontFamily: "Inter", fontSize: 12.5, fontWeight: 700, color: "#16283D", background: "transparent", border: "none", cursor: "pointer" }}>Marcar todos</button>
+          </>
+        ) : (
+          <>
+            <div style={{ fontFamily: "Inter", fontSize: 12, letterSpacing: 1, textTransform: "uppercase", color: "var(--label)", fontWeight: 700 }}>Fluxo de caixa</div>
+            <button onClick={() => setMenuOpen(true)} style={{ ...navBtn, background: "transparent" }}><Icon name="dots" color="var(--ink-soft)" /></button>
+          </>
+        )}
+      </div>
+
+      <MonthBar date={date} setDate={setDate} />
+
+      {mode === "search" && (
+        <div style={{ padding: "0 18px 10px" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div style={{ flex: 1, position: "relative" }}>
+              <input autoFocus placeholder="Buscar por descrição..." value={query} onChange={e=>setQuery(e.target.value)} style={{ ...inputStyle, paddingLeft: 36 }} />
+              <div style={{ position: "absolute", left: 11, top: 11 }}><Icon name="search" size={16} color="var(--muted-2)" /></div>
+            </div>
+            <button onClick={() => { setMode("normal"); setQuery(""); }} style={{ ...navBtn, background: "var(--soft)" }}><Icon name="x" size={16} color="#16283D" /></button>
+          </div>
+        </div>
+      )}
+
+      <div style={{ padding: "6px 18px 0", display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <div style={{ fontFamily: "Inter", fontSize: 12.5, color: "var(--muted-2)" }}>{filtered.length} lançamento(s)</div>
+        <div style={{ fontFamily: "IBM Plex Mono", fontSize: 15, fontWeight: 600, color: total >= 0 ? "#1E7F63" : "#A13D46" }}>{brl(total)}</div>
+      </div>
+
+      <div style={{ padding: "10px 18px 0" }}>
+        {grouped.length === 0 && <Card><div style={{ fontFamily: "Inter", fontSize: 13.5, color: "var(--muted)" }}>Nenhum lançamento neste período.</div></Card>}
+        {grouped.map(([d, items]) => (
+          <div key={d} style={{ marginBottom: 14 }}>
+            <div style={{ fontFamily: "IBM Plex Mono", fontSize: 11.5, color: "var(--muted-2)", marginBottom: 6 }}>{new Date(d).toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "short" })}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {items.map(t => (
+                <Card key={t.id} onClick={() => mode === "select" ? toggleSel(t.id) : null}
+                  style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, cursor: mode==="select"?"pointer":"default",
+                    border: selected.includes(t.id) ? "1.5px solid #16283D" : "1.5px solid transparent" }}>
+                  {mode === "select" && (
+                    <div style={{ width: 20, height: 20, borderRadius: 6, border: "1.5px solid #16283D", background: selected.includes(t.id) ? "#16283D" : "transparent", display:"flex",alignItems:"center",justifyContent:"center", flexShrink:0 }}>
+                      {selected.includes(t.id) && <Icon name="check" size={13} color="#fff" />}
+                    </div>
+                  )}
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: t.type==="despesa"?"#A13D46":t.type==="receita"?"#1E7F63":"#A9834B", flexShrink:0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontFamily: "Inter", fontSize: 13.5, fontWeight: 600, overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{t.desc}{t.installment && ` (${t.installment.current}/${t.installment.total})`}</div>
+                    <div style={{ fontFamily: "Inter", fontSize: 11.5, color: "var(--muted-2)" }}>{t.category} {t.status === "pendente" && "· Pendente"} {t.fixed && "· Fixo"} {t.installment && "· Parcelado"}</div>
+                  </div>
+                  <div style={{ fontFamily: "IBM Plex Mono", fontSize: 14, fontWeight: 600, color: t.value >= 0 ? "#1E7F63" : "#A13D46" }}>{brl(t.value)}</div>
+                </Card>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* menu de 3 pontos */}
+      <Sheet open={menuOpen} onClose={() => setMenuOpen(false)}>
+        {[
+          { icon: "check", label: "Selecionar", act: () => setMode("select") },
+          { icon: "search", label: "Pesquisar", act: () => setMode("search") },
+          { icon: "filter", label: "Filtrar", act: () => setMode("filter") },
+          { icon: "cal", label: "Alterar período de visualização", act: () => setMode("period") },
+        ].map(o => (
+          <div key={o.label} onClick={() => { o.act(); setMenuOpen(false); }} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 4px", cursor:"pointer", borderBottom:"1px solid var(--border-2)" }}>
+            <Icon name={o.icon} color="#16283D" size={19} />
+            <div style={{ fontFamily:"Inter", fontSize:14.5, fontWeight:600, color:"var(--ink-soft)" }}>{o.label}</div>
+          </div>
+        ))}
+      </Sheet>
+
+      {/* filtro */}
+      <Sheet open={mode === "filter"} onClose={() => setMode("normal")} title="Filtrar">
+        {[
+          { key: "types", label: "Tipo", opts: [["receita","Receita"],["despesa","Despesa"],["transferencia","Transferência"],["fixo","Lançamentos fixos"],["parcelado","Lançamentos parcelados"]] },
+          { key: "status", label: "Situação", opts: [["pendente","Pendente"],["resolvido","Resolvido"]] },
+          { key: "accounts", label: "Contas", opts: data.accounts.map(a=>[a.id,a.name]) },
+        ].map(group => (
+          <div key={group.key} style={{ marginBottom: 16 }}>
+            <div style={{ fontFamily:"Inter", fontSize:12, fontWeight:700, color:"var(--muted)", marginBottom:8 }}>{group.label}</div>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+              {group.opts.map(([val,lab]) => (
+                <Pill key={val} active={filters[group.key]?.includes(val)} onClick={() => setFilters(f => ({ ...f, [group.key]: (f[group.key]||[]).includes(val) ? f[group.key].filter(x=>x!==val) : [...(f[group.key]||[]), val] }))}>{lab}</Pill>
+              ))}
+            </div>
+          </div>
+        ))}
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontFamily:"Inter", fontSize:12, fontWeight:700, color:"var(--muted)", marginBottom:8 }}>Categorias</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:8, maxHeight: 140, overflowY:"auto" }}>
+            {allCats.map(c => (
+              <Pill key={c} active={filters.categories.includes(c)} onClick={() => setFilters(f => ({ ...f, categories: f.categories.includes(c) ? f.categories.filter(x=>x!==c) : [...f.categories, c] }))}>{c}</Pill>
+            ))}
+          </div>
+        </div>
+        <button onClick={() => setMode("normal")} style={primaryBtn}>Aplicar filtros</button>
+      </Sheet>
+
+      {/* período */}
+      <Sheet open={mode === "period"} onClose={() => setMode("normal")} title="Alterar período de visualização">
+        {[["hoje","Hoje"],["mes","Mês atual"],["ano","Este ano"],["7d","Últimos 7 dias"],["15d","Últimos 15 dias"],["30d","Últimos 30 dias"],["custom","Período personalizado"]].map(([val,lab]) => (
+          <label key={val} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 4px", cursor:"pointer" }}>
+            <div onClick={()=>setPeriod(val)} style={{ width: 20, height: 20, borderRadius: 6, border: "1.5px solid #16283D", background: period===val ? "#16283D":"transparent", display:"flex",alignItems:"center",justifyContent:"center" }}>
+              {period===val && <Icon name="check" size={13} color="#fff" />}
+            </div>
+            <div style={{ fontFamily:"Inter", fontSize:14 }}>{lab}</div>
+          </label>
+        ))}
+        <button onClick={() => setMode("normal")} style={{ ...primaryBtn, marginTop: 10 }}>Aplicar</button>
+      </Sheet>
+
+      {/* botão flutuante novo lançamento */}
+      {mode === "normal" && (
+        <button onClick={() => { setNewTx(blankNewTx()); setNewTxOpen(true); }} style={{ position: "absolute", right: 18, bottom: 18, width: 50, height: 50, borderRadius: "50%", border: "none", background: "#16283D", boxShadow: "0 10px 24px -8px rgba(22,40,61,0.55)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+          <Icon name="plus" color="#fff" size={22} />
+        </button>
+      )}
+
+      <Sheet open={newTxOpen} onClose={() => setNewTxOpen(false)} title="Novo lançamento">
+        <Field label="Tipo">
+          <div style={{ display: "flex", gap: 8 }}>
+            {[["despesa","Despesa"],["receita","Receita"],["transferencia","Transferência"]].map(([v,l]) => (
+              <Pill key={v} active={newTx.type===v} onClick={() => setNewTx({ ...newTx, type: v, category: v==="receita"?RECEITA_CATS[0]:DESPESA_CATS[0] })}>{l}</Pill>
+            ))}
+          </div>
+        </Field>
+        <Field label="Descrição"><input style={inputStyle} placeholder="Ex: Panela elétrica" value={newTx.desc} onChange={e => setNewTx({ ...newTx, desc: e.target.value })} /></Field>
+        <Field label={newTx.isInstallment ? "Valor total da compra" : "Valor"}><input style={inputStyle} type="number" placeholder="0,00" value={newTx.value} onChange={e => setNewTx({ ...newTx, value: e.target.value })} /></Field>
+        <Field label="Categoria">
+          <select style={inputStyle} value={newTx.category} onChange={e => setNewTx({ ...newTx, category: e.target.value })}>
+            {(newTx.type === "receita" ? RECEITA_CATS : DESPESA_CATS).map(c => <option key={c}>{c}</option>)}
+          </select>
+        </Field>
+        <Field label="Conta">
+          <select style={inputStyle} value={newTx.accountId} onChange={e => setNewTx({ ...newTx, accountId: e.target.value })}>
+            <option value="">Selecione</option>
+            {data.accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </Field>
+        <Field label={newTx.isInstallment ? "Data desta parcela" : "Data"}><input style={inputStyle} type="date" value={newTx.date} onChange={e => setNewTx({ ...newTx, date: e.target.value })} /></Field>
+
+        <Field label="É um lançamento fixo?">
+          <div style={{ display: "flex", gap: 8 }}>
+            <Pill active={newTx.fixed} onClick={() => setNewTx({ ...newTx, fixed: true })}>Sim</Pill>
+            <Pill active={!newTx.fixed} onClick={() => setNewTx({ ...newTx, fixed: false })}>Não</Pill>
+          </div>
+        </Field>
+
+        <Field label="É parcelado?">
+          <div style={{ display: "flex", gap: 8 }}>
+            <Pill active={newTx.isInstallment} onClick={() => setNewTx({ ...newTx, isInstallment: true })}>Sim</Pill>
+            <Pill active={!newTx.isInstallment} onClick={() => setNewTx({ ...newTx, isInstallment: false })}>Não</Pill>
+          </div>
+        </Field>
+
+        {newTx.isInstallment && (
+          <div style={{ background: "var(--soft)", borderRadius: 14, padding: 14, marginBottom: 14 }}>
+            <div style={{ display: "flex", gap: 10 }}>
+              <div style={{ flex: 1 }}>
+                <Field label="Total de parcelas"><input style={inputStyle} type="number" min="1" value={newTx.totalParcelas} onChange={e => setNewTx({ ...newTx, totalParcelas: e.target.value, currentParcela: Math.min(parseInt(newTx.currentParcela)||1, parseInt(e.target.value)||1) })} /></Field>
+              </div>
+              <div style={{ flex: 1 }}>
+                <Field label="Qual parcela é esta?"><input style={inputStyle} type="number" min="1" max={newTx.totalParcelas} value={newTx.currentParcela} onChange={e => setNewTx({ ...newTx, currentParcela: e.target.value })} /></Field>
+              </div>
+            </div>
+            {newTx.value && newTx.totalParcelas > 0 && (
+              <div style={{ fontFamily: "Inter", fontSize: 12.5, color: "#3E5C76" }}>
+                {parseInt(newTx.totalParcelas) || 0}x de {brl((parseFloat(newTx.value)||0)/(parseInt(newTx.totalParcelas)||1))}. Vamos lançar a parcela {newTx.currentParcela} em {newTx.date?.split("-").reverse().join("/")}, gerando automaticamente as parcelas anteriores (já pagas) e as seguintes (pendentes) nos meses corretos.
+              </div>
+            )}
+          </div>
+        )}
+
+        <Field label="Tag (opcional)">
+          <select style={inputStyle} value={newTx.tag} onChange={e => setNewTx({ ...newTx, tag: e.target.value })}>
+            <option value="">Sem tag</option>
+            {(data.tags || []).map(t => <option key={t} value={t}>#{t}</option>)}
+          </select>
+        </Field>
+
+        <button onClick={saveNewTx} style={primaryBtn}>Salvar lançamento</button>
+      </Sheet>
+
+      {/* bottom bar de seleção */}
+      {mode === "select" && selected.length > 0 && (
+        <div style={{ position:"absolute", left:0, right:0, bottom: 0, background:"#16283D", borderRadius:"18px 18px 0 0", padding:"14px 18px", display:"flex", alignItems:"center", gap:10, boxShadow:"0 -8px 24px rgba(0,0,0,0.18)" }}>
+          <div style={{ flex:1 }}>
+            <div style={{ fontFamily:"Inter", fontSize:11, color:"#AAB8C4" }}>Total selecionado</div>
+            <div style={{ fontFamily:"IBM Plex Mono", fontSize:16, fontWeight:700, color:"#fff" }}>{brl(selTotal)}</div>
+          </div>
+          <button onClick={deleteSelected} style={{ width:38, height:38, borderRadius:10, border:"none", background:"#A13D46", display:"flex",alignItems:"center",justifyContent:"center", cursor:"pointer" }}><Icon name="trash" size={17} color="#fff" /></button>
+          <button style={{ padding:"9px 16px", borderRadius:10, border:"1.5px solid #fff", background:"transparent", color:"#fff", fontFamily:"Inter", fontWeight:700, fontSize:13, cursor:"pointer" }}>Alterar</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================ SCREEN: RELATÓRIOS */
+function Relatorios({ data, date, setDate }) {
+  const [tab, setTab] = useState("categorias");
+  const [statusFilter, setStatusFilter] = useState("todos");
+
+  const monthTx = useMemo(() => data.transactions.filter(t => {
+    const d = new Date(t.date);
+    return d.getFullYear() === date.getFullYear() && d.getMonth() === date.getMonth() &&
+      (statusFilter === "todos" || t.status === statusFilter);
+  }), [data.transactions, date, statusFilter]);
+
+  const despesasPorCat = useMemo(() => {
+    const m = {};
+    monthTx.filter(t=>t.type==="despesa").forEach(t => { m[t.category] = (m[t.category]||0) + Math.abs(t.value); });
+    return Object.entries(m).sort((a,b)=>b[1]-a[1]);
+  }, [monthTx]);
+  const totalDespesas = despesasPorCat.reduce((s,[,v])=>s+v,0);
+
+  const palette = ["#16283D","#1E7F63","#A13D46","#A9834B","#3E5C76","#5B6B7C","#6B7B8C","#8C6D46"];
+  let acc = 0;
+  const slices = despesasPorCat.map(([cat,val],i) => {
+    const frac = totalDespesas ? val/totalDespesas : 0;
+    const start = acc; acc += frac;
+    return { cat, val, frac, start, color: palette[i % palette.length] };
+  });
+
+  const receitas = monthTx.filter(t=>t.type==="receita").reduce((s,t)=>s+t.value,0);
+  const despesas = monthTx.filter(t=>t.type==="despesa").reduce((s,t)=>s+Math.abs(t.value),0);
+  const saldo = receitas - despesas;
+
+  const tags = useMemo(() => {
+    const m = {};
+    monthTx.forEach(t => { const tg = t.tag || "sem tag"; m[tg] = (m[tg]||0) + t.value; });
+    return Object.entries(m);
+  }, [monthTx]);
+
+  return (
+    <div style={{ paddingBottom: 100 }}>
+      <MonthBar date={date} setDate={setDate} title="Relatórios" />
+
+      <div style={{ padding: "4px 18px 0", display: "flex", gap: 8 }}>
+        {[["categorias","Categorias"],["balanco","Balanço"],["tags","Tags"]].map(([v,l]) => (
+          <Pill key={v} active={tab===v} onClick={()=>setTab(v)}>{l}</Pill>
+        ))}
+      </div>
+      <div style={{ padding: "10px 18px 0", display: "flex", gap: 8 }}>
+        {[["todos","Todos"],["resolvido","Pagos"],["pendente","Não pagos"]].map(([v,l]) => (
+          <Pill key={v} active={statusFilter===v} onClick={()=>setStatusFilter(v)}>{l}</Pill>
+        ))}
+      </div>
+
+      {tab === "categorias" && (
+        <div style={{ padding: "18px 18px 0" }}>
+          <Card>
+            {totalDespesas === 0 ? (
+              <div style={{ fontFamily:"Inter", fontSize:13.5, color:"var(--muted)", textAlign:"center", padding:"20px 0" }}>Sem despesas neste período.</div>
+            ) : (
+              <div style={{ display:"flex", alignItems:"center", gap: 22, flexWrap: "wrap", justifyContent:"center" }}>
+                <svg width="160" height="160" viewBox="0 0 32 32" style={{ transform: "rotate(-90deg)" }}>
+                  {slices.map(s => {
+                    const dash = `${s.frac*100} ${100-s.frac*100}`;
+                    const offset = 100 - s.start*100;
+                    return <circle key={s.cat} r="16" cx="16" cy="16" fill="transparent" stroke={s.color} strokeWidth="6.5" strokeDasharray={dash} strokeDashoffset={offset} pathLength="100" />;
+                  })}
+                </svg>
+                <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
+                  {slices.map(s => (
+                    <div key={s.cat} style={{ display:"flex", alignItems:"center", gap:8 }}>
+                      <div style={{ width:10, height:10, borderRadius:3, background:s.color }} />
+                      <div style={{ fontFamily:"Inter", fontSize:12.5, color:"var(--ink-soft)" }}>{s.cat}</div>
+                      <div style={{ fontFamily:"IBM Plex Mono", fontSize:12, color:"var(--muted-2)" }}>{Math.round(s.frac*100)}%</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
+
+      {tab === "balanco" && (
+        <div style={{ padding: "18px 18px 0" }}>
+          <Card>
+            <div style={{ display:"flex", alignItems:"flex-end", gap: 26, height: 150, justifyContent:"center", paddingTop: 10 }}>
+              {[["Receitas",receitas,"#1E7F63"],["Despesas",despesas,"#A13D46"],["Saldo",Math.abs(saldo), saldo>=0?"#16283D":"#A13D46"]].map(([lab,val,color]) => {
+                const max = Math.max(receitas,despesas,Math.abs(saldo),1);
+                const h = Math.max(6,(val/max)*120);
+                return (
+                  <div key={lab} style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:8 }}>
+                    <div style={{ fontFamily:"IBM Plex Mono", fontSize:11.5, color:"var(--ink-soft)" }}>{brl(val)}</div>
+                    <div style={{ width: 40, height: h, background: color, borderRadius: 8 }} />
+                    <div style={{ fontFamily:"Inter", fontSize:12, fontWeight:600, color:"var(--muted)" }}>{lab}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {tab === "tags" && (
+        <div style={{ padding: "18px 18px 0", display:"flex", flexDirection:"column", gap:8 }}>
+          {tags.length === 0 && <Card><div style={{ fontFamily:"Inter", fontSize:13.5, color:"var(--muted)" }}>Nenhuma tag neste período.</div></Card>}
+          {tags.map(([tag,val]) => (
+            <Card key={tag} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding: 14 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                <Icon name="tag" size={16} color="var(--label)" />
+                <div style={{ fontFamily:"Inter", fontSize:13.5, fontWeight:600 }}>{tag}</div>
+              </div>
+              <div style={{ fontFamily:"IBM Plex Mono", fontSize:14, fontWeight:600, color: val>=0?"#1E7F63":"#A13D46" }}>{brl(val)}</div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================ SCREEN: LIMITES */
+function Limites({ data, patch }) {
+  const [adding, setAdding] = useState(false);
+  const [detailId, setDetailId] = useState(null);
+  const [draft, setDraft] = useState({ category: DESPESA_CATS[0], value: "", repeats: true, period: "Mensal" });
+
+  const spentFor = (cat) => data.transactions.filter(t => t.type==="despesa" && t.category===cat)
+    .reduce((s,t)=>s+Math.abs(t.value),0);
+
+  const totalLimite = data.limits.reduce((s,l)=>s+l.value,0);
+  const totalGasto = data.limits.reduce((s,l)=>s+spentFor(l.category),0);
+  const totalDisponivel = totalLimite - totalGasto;
+
+  function addLimit() {
+    if (!draft.value) return;
+    patch(d => ({ ...d, limits: [...d.limits, { id: uid(), category: draft.category, value: parseFloat(draft.value), repeats: draft.repeats, period: draft.period }] }));
+    setAdding(false);
+    setDraft({ category: DESPESA_CATS[0], value: "", repeats: true, period: "Mensal" });
+  }
+
+  const detail = data.limits.find(l=>l.id===detailId);
+
+  return (
+    <div style={{ paddingBottom: 100 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"22px 18px 4px" }}>
+        <div style={{ fontFamily: "Source Serif 4, serif", fontSize: 21, fontWeight: 600, color: "#16283D" }}>Limites de gastos</div>
+        <button onClick={()=>setAdding(true)} style={{ ...navBtn, background:"#16283D" }}><Icon name="plus" color="#fff" size={18} /></button>
+      </div>
+
+      <div style={{ padding: "14px 18px 0", display:"flex", flexDirection:"column", gap:8 }}>
+        {data.limits.map(l => {
+          const spent = spentFor(l.category);
+          const pct = Math.min(100, (spent/l.value)*100);
+          const over = spent > l.value;
+          return (
+            <Card key={l.id} onClick={()=>setDetailId(l.id)} style={{ cursor:"pointer" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", marginBottom: 8 }}>
+                <div style={{ fontFamily:"Inter", fontSize:13.5, fontWeight:700 }}>{l.category}</div>
+                <div style={{ fontFamily:"IBM Plex Mono", fontSize:12.5, color: over ? "#A13D46" : "var(--muted)" }}>{brl(spent)} / {brl(l.value)}</div>
+              </div>
+              <div style={{ height:8, borderRadius:6, background:"var(--border-2)", overflow:"hidden" }}>
+                <div style={{ width: `${pct}%`, height:"100%", background: over ? "#A13D46" : "var(--label)", borderRadius:6, transition:"width .3s" }} />
+              </div>
+              <div style={{ fontFamily:"Inter", fontSize:11, color:"var(--muted-2)", marginTop:6 }}>{l.repeats ? "Repete todo mês" : l.period}</div>
+            </Card>
+          );
+        })}
+      </div>
+
+      {/* total disponível — clicável */}
+      <div style={{ padding: "16px 18px 0" }}>
+        <Card onClick={()=>setDetailId("__total")} style={{ background:"#16283D", color:"#FFFFFF", cursor:"pointer" }}>
+          <div style={{ fontFamily:"Inter", fontSize:12, color:"#AAB8C4", fontWeight:600 }}>Total disponível</div>
+          <div style={{ fontFamily:"Source Serif 4, serif", fontSize:26, fontWeight:600, marginBottom:8 }}>{brl(totalDisponivel)}</div>
+          <div style={{ height:8, borderRadius:6, background:"rgba(255,255,255,0.2)", overflow:"hidden" }}>
+            <div style={{ width: `${Math.min(100,(totalGasto/(totalLimite||1))*100)}%`, height:"100%", background:"var(--soft)", borderRadius:6 }} />
+          </div>
+        </Card>
+      </div>
+
+      <Sheet open={adding} onClose={()=>setAdding(false)} title="Novo limite de gasto">
+        <Field label="Categoria">
+          <select style={inputStyle} value={draft.category} onChange={e=>setDraft({...draft, category:e.target.value})}>
+            {DESPESA_CATS.map(c=><option key={c}>{c}</option>)}
+          </select>
+        </Field>
+        <Field label="Valor do limite">
+          <input style={inputStyle} type="number" placeholder="Ex: 100" value={draft.value} onChange={e=>setDraft({...draft, value:e.target.value})} />
+        </Field>
+        <Field label="Este limite se repete?">
+          <div style={{ display:"flex", gap:8 }}>
+            <Pill active={draft.repeats} onClick={()=>setDraft({...draft, repeats:true, period:"Mensal"})}>Sim, todo mês</Pill>
+            <Pill active={!draft.repeats} onClick={()=>setDraft({...draft, repeats:false, period:"Este mês"})}>Não, só este período</Pill>
+          </div>
+        </Field>
+        <button onClick={addLimit} style={primaryBtn}>Salvar limite</button>
+      </Sheet>
+
+      <Sheet open={!!detailId} onClose={()=>setDetailId(null)} title={detailId==="__total" ? "Resumo geral" : detail?.category}>
+        {detailId === "__total" ? (
+          <div>
+            <Field label="Limite total do mês"><div style={{ fontFamily:"IBM Plex Mono", fontSize:20, fontWeight:600 }}>{brl(totalLimite)}</div></Field>
+            <Field label="Gasto acumulado"><div style={{ fontFamily:"IBM Plex Mono", fontSize:20, fontWeight:600, color:"#A13D46" }}>{brl(totalGasto)}</div></Field>
+            <Field label="Total disponível"><div style={{ fontFamily:"IBM Plex Mono", fontSize:20, fontWeight:600, color:"#1E7F63" }}>{brl(totalDisponivel)}</div></Field>
+            <div style={{ height:10, borderRadius:6, background:"var(--border-2)", overflow:"hidden" }}>
+              <div style={{ width: `${Math.min(100,(totalGasto/(totalLimite||1))*100)}%`, height:"100%", background:"#16283D" }} />
+            </div>
+          </div>
+        ) : detail && (
+          <div>
+            <Field label="Gasto acumulado"><div style={{ fontFamily:"IBM Plex Mono", fontSize:18, fontWeight:600 }}>{brl(spentFor(detail.category))}</div></Field>
+            <Field label="Limite"><div style={{ fontFamily:"IBM Plex Mono", fontSize:18, fontWeight:600 }}>{brl(detail.value)}</div></Field>
+            <button onClick={()=>{ patch(d=>({...d, limits: d.limits.filter(l=>l.id!==detail.id)})); setDetailId(null); }} style={secondaryBtn}>Remover limite</button>
+          </div>
+        )}
+      </Sheet>
+    </div>
+  );
+}
+
+/* ============================================================ SCREEN: CONTA */
+function Conta({ data, patch, isDark, toggleTheme }) {
+  const [screen, setScreen] = useState("main"); // main | edit | conexoes | cartoes | categorias | tags
+  const [editDraft, setEditDraft] = useState(data.profile);
+  const [addingCard, setAddingCard] = useState(false);
+  const [cardDraft, setCardDraft] = useState({ name:"", bank:"nubank", limit:"" });
+  const [newCat, setNewCat] = useState("");
+  const [catType, setCatType] = useState("despesa");
+  const [newTag, setNewTag] = useState("");
+
+  function addTag() {
+    const clean = newTag.trim().toLowerCase().replace(/\s+/g, "-");
+    if (!clean) return;
+    patch(d => {
+      const current = d.tags || [];
+      if (current.includes(clean)) return d;
+      return { ...d, tags: [...current, clean] };
+    });
+    setNewTag("");
+  }
+  function removeTag(tag) {
+    patch(d => ({
+      ...d,
+      tags: (d.tags || []).filter(t => t !== tag),
+      transactions: d.transactions.map(t => t.tag === tag ? { ...t, tag: "" } : t),
+    }));
+  }
+
+  const back = () => setScreen("main");
+  const HeaderBar = ({ title }) => (
+    <div style={{ display:"flex", alignItems:"center", gap:10, padding:"20px 18px 6px" }}>
+      <button onClick={back} style={{ ...navBtn, background:"transparent" }}><Icon name="chevronL" color="var(--ink-soft)" /></button>
+      <div style={{ fontFamily:"Source Serif 4, serif", fontSize:19, fontWeight:600, color:"#16283D" }}>{title}</div>
+    </div>
+  );
+
+  if (screen === "edit") {
+    return (
+      <div style={{ paddingBottom: 100 }}>
+        <HeaderBar title="Editar perfil" />
+        <div style={{ padding: "10px 18px 0" }}>
+          <Field label="Nome"><input style={inputStyle} value={editDraft.name} onChange={e=>setEditDraft({...editDraft,name:e.target.value})} /></Field>
+          <Field label="E-mail"><input style={inputStyle} value={editDraft.email} onChange={e=>setEditDraft({...editDraft,email:e.target.value})} /></Field>
+          <Field label="Senha"><input style={inputStyle} type="password" placeholder="••••••••" onChange={e=>setEditDraft({...editDraft,password:e.target.value})} /></Field>
+          <Field label="Data de nascimento"><input style={inputStyle} type="date" value={editDraft.birthdate} onChange={e=>setEditDraft({...editDraft,birthdate:e.target.value})} /></Field>
+          <button onClick={()=>{ patch(d=>({...d, profile: editDraft})); back(); }} style={primaryBtn}>Salvar alterações</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (screen === "conexoes") {
+    return (
+      <div style={{ paddingBottom: 100 }}>
+        <HeaderBar title="Conexões bancárias" />
+        <div style={{ padding: "10px 18px 0" }}>
+          <div style={{ fontFamily:"Inter", fontSize:12, letterSpacing:1, textTransform:"uppercase", color:"var(--label)", fontWeight:700, marginBottom:10 }}>Seus bancos conectados</div>
+          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+            {data.accounts.map(a => (
+              <Card key={a.id} style={{ display:"flex", alignItems:"center", gap:12 }}>
+                <BankBadge bank={a.bank} size={40} />
+                <div style={{ flex:1 }}>
+                  <div style={{ fontFamily:"Inter", fontSize:13.5, fontWeight:700 }}>{BANKS[a.bank]?.name}</div>
+                  <div style={{ fontFamily:"Inter", fontSize:11.5, color:"var(--muted-2)" }}>{Math.floor(Math.random()*20)+3} novos lançamentos</div>
+                </div>
+                <div style={{ width:9, height:9, borderRadius:"50%", background:"var(--label)" }} />
+              </Card>
+            ))}
+          </div>
+          <button style={{ ...primaryBtn, marginTop: 16 }}>+ Conectar novo banco</button>
+          <div style={{ fontFamily:"Inter", fontSize:11.5, color:"var(--muted-2)", marginTop:10, textAlign:"center" }}>
+            Conexão via Open Finance — dados só-leitura, autorizados pelo Banco Central.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (screen === "cartoes") {
+    return (
+      <div style={{ paddingBottom: 100 }}>
+        <HeaderBar title="Cartões de crédito" />
+        <div style={{ padding: "10px 18px 0", display:"flex", flexDirection:"column", gap:10 }}>
+          {data.cards.map(c => (
+            <Card key={c.id}>
+              <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom: 10 }}>
+                <BankBadge bank={c.bank} size={38} />
+                <div style={{ flex:1 }}>
+                  <div style={{ fontFamily:"Inter", fontSize:13.5, fontWeight:700 }}>{c.name}</div>
+                  <div style={{ fontFamily:"Inter", fontSize:11.5, color:"var(--muted-2)" }}>Limite {brl(c.limit)} · fecha dia {c.closingDay}</div>
+                </div>
+              </div>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:"var(--soft)", borderRadius:12, padding:"10px 12px" }}>
+                <div>
+                  <div style={{ fontFamily:"Inter", fontSize:11, color:"#3E5C76", fontWeight:700 }}>Fatura atual · vence dia {c.dueDay}</div>
+                  <div style={{ fontFamily:"IBM Plex Mono", fontSize:16, fontWeight:600, color:"#16283D" }}>{brl(c.invoice)}</div>
+                </div>
+                <button style={{ border:"1.5px solid #16283D", background:"transparent", color:"#16283D", borderRadius:9, padding:"7px 11px", fontFamily:"Inter", fontSize:12, fontWeight:700, cursor:"pointer" }}>Ver fatura</button>
+              </div>
+            </Card>
+          ))}
+          <button onClick={()=>setAddingCard(true)} style={primaryBtn}>+ Cadastrar cartão</button>
+        </div>
+        <Sheet open={addingCard} onClose={()=>setAddingCard(false)} title="Novo cartão">
+          <Field label="Apelido do cartão"><input style={inputStyle} value={cardDraft.name} onChange={e=>setCardDraft({...cardDraft,name:e.target.value})} /></Field>
+          <Field label="Banco">
+            <select style={inputStyle} value={cardDraft.bank} onChange={e=>setCardDraft({...cardDraft,bank:e.target.value})}>
+              {Object.entries(BANKS).map(([k,b])=><option key={k} value={k}>{b.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Limite do cartão"><input style={inputStyle} type="number" value={cardDraft.limit} onChange={e=>setCardDraft({...cardDraft,limit:e.target.value})} /></Field>
+          <button onClick={()=>{
+            if(!cardDraft.name||!cardDraft.limit) return;
+            patch(d=>({...d, cards:[...d.cards,{ id:uid(), name:cardDraft.name, bank:cardDraft.bank, limit:parseFloat(cardDraft.limit), closingDay:5, dueDay:12, invoice:0 }]}));
+            setAddingCard(false); setCardDraft({name:"",bank:"nubank",limit:""});
+          }} style={primaryBtn}>Salvar cartão</button>
+        </Sheet>
+      </div>
+    );
+  }
+
+  if (screen === "categorias") {
+    return (
+      <div style={{ paddingBottom: 100 }}>
+        <HeaderBar title="Categorias" />
+        <div style={{ padding: "10px 18px 0" }}>
+          <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+            <Pill active={catType==="despesa"} onClick={()=>setCatType("despesa")}>Despesas</Pill>
+            <Pill active={catType==="receita"} onClick={()=>setCatType("receita")}>Receitas</Pill>
+          </div>
+          <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+            <input style={inputStyle} placeholder="Nova categoria..." value={newCat} onChange={e=>setNewCat(e.target.value)} />
+            <button onClick={()=>{
+              if(!newCat) return;
+              patch(d=>({...d, categories: { ...(d.categories||{despesa:DESPESA_CATS,receita:RECEITA_CATS}), [catType]: [...((d.categories?.[catType])||(catType==="despesa"?DESPESA_CATS:RECEITA_CATS)), newCat] } }));
+              setNewCat("");
+            }} style={{ ...navBtn, width:44, background:"#16283D" }}><Icon name="plus" color="#fff" size={18} /></button>
+          </div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+            {(data.categories?.[catType] || (catType==="despesa"?DESPESA_CATS:RECEITA_CATS)).map(c => (
+              <div key={c} style={{ padding:"7px 12px", borderRadius:999, background:"var(--card)", border:"1.5px solid var(--border)", fontFamily:"Inter", fontSize:12.5, fontWeight:600 }}>{c}</div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (screen === "tags") {
+    const usedTags = data.transactions.map(t=>t.tag).filter(Boolean);
+    const allTags = [...new Set([...(data.tags||[]), ...usedTags])];
+    return (
+      <div style={{ paddingBottom: 100 }}>
+        <HeaderBar title="Tags" />
+        <div style={{ padding: "10px 18px 0" }}>
+          <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+            <input style={inputStyle} placeholder="Nova tag..." value={newTag} onChange={e=>setNewTag(e.target.value)}
+              onKeyDown={e=>{ if(e.key==="Enter") addTag(); }} />
+            <button onClick={addTag} style={{ ...navBtn, width:44, background:"#16283D" }}><Icon name="plus" color="#fff" size={18} /></button>
+          </div>
+          {allTags.length===0 && <div style={{ fontFamily:"Inter", fontSize:13.5, color:"var(--muted)" }}>Nenhuma tag criada ainda.</div>}
+          <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+            {allTags.map(t => (
+              <div key={t} style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 8px 7px 12px", borderRadius:999, background:"var(--card)", border:"1.5px solid var(--border)", fontFamily:"Inter", fontSize:12.5, fontWeight:600 }}>
+                #{t}
+                <button onClick={()=>removeTag(t)} style={{ border:"none", background:"transparent", cursor:"pointer", display:"flex", alignItems:"center", padding:2 }}>
+                  <Icon name="x" size={12} color="var(--muted-2)" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // main account screen
+  return (
+    <div style={{ paddingBottom: 100 }}>
+      <div style={{ display:"flex", flexDirection:"column", alignItems:"center", padding:"30px 18px 10px" }}>
+        <div style={{ width: 78, height: 78, borderRadius:"50%", background:"#16283D", color:"#FFFFFF", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"Source Serif 4, serif", fontSize: 28, fontWeight:600 }}>
+          {data.profile.name.slice(0,1)}
+        </div>
+        <div style={{ fontFamily:"Source Serif 4, serif", fontSize:20, fontWeight:600, color:"#16283D", marginTop:10 }}>{data.profile.name}</div>
+        <button onClick={()=>{ setEditDraft(data.profile); setScreen("edit"); }} style={{ marginTop:8, border:"1.5px solid #16283D", background:"transparent", color:"#16283D", borderRadius:10, padding:"8px 16px", fontFamily:"Inter", fontWeight:700, fontSize:12.5, cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}>
+          <Icon name="edit" size={14} /> Editar perfil
+        </button>
+      </div>
+
+      <div style={{ padding: "10px 18px 0" }}>
+        <Card style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: 14, marginBottom: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ width: 36, height: 36, borderRadius: 10, background: "var(--soft)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Icon name={isDark ? "moon" : "sun"} size={17} color="#16283D" />
+            </div>
+            <div style={{ fontFamily: "Inter", fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>Aparência</div>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <Pill active={!isDark} onClick={() => { if (isDark) toggleTheme(); }}>Claro</Pill>
+            <Pill active={isDark} onClick={() => { if (!isDark) toggleTheme(); }}>Escuro</Pill>
+          </div>
+        </Card>
+      </div>
+
+      <div style={{ padding: "0 18px 0", display:"flex", flexDirection:"column", gap:8 }}>
+        {[
+          { icon:"wallet", label:"Configurar contas", go:"conexoes" },
+          { icon:"card", label:"Cartões de crédito", go:"cartoes" },
+          { icon:"list", label:"Categorias", go:"categorias" },
+          { icon:"tag", label:"Tags", go:"tags" },
+          { icon:"link", label:"Conexões bancárias", go:"conexoes" },
+        ].map(o => (
+          <Card key={o.label} onClick={()=>setScreen(o.go)} style={{ display:"flex", alignItems:"center", gap:12, cursor:"pointer", padding:14 }}>
+            <div style={{ width:36, height:36, borderRadius:10, background:"var(--soft)", display:"flex",alignItems:"center",justifyContent:"center" }}><Icon name={o.icon} size={17} color="#16283D" /></div>
+            <div style={{ flex:1, fontFamily:"Inter", fontSize:14, fontWeight:600 }}>{o.label}</div>
+            <Icon name="chevronR" size={17} color="var(--muted-2)" />
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================ ROOT APP */
+function loadThemeSync() {
+  try { return localStorage.getItem(THEME_KEY) === "dark"; } catch (e) { return false; }
+}
+function saveTheme(isDark) {
+  try { localStorage.setItem(THEME_KEY, isDark ? "dark" : "light"); } catch (e) {}
+}
+
+function FinanceApp() {
+  const [data, setData] = useState(null);
+  const [tab, setTab] = useState("inicio");
+  const [date, setDate] = useState(new Date());
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [isDark, setIsDark] = useState(loadThemeSync);
+  const saveTimer = useRef(null);
+
+  useEffect(() => { loadData().then(setData); }, []);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState(new Date());
+
+  async function reloadFromCloud() {
+    setSyncing(true);
+    try {
+      const fresh = await loadData();
+      setData(fresh);
+      setLastSync(new Date());
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  function toggleTheme() {
+    setIsDark(prev => { const next = !prev; saveTheme(next); return next; });
+  }
+
+  function patch(fn) {
+    setData(prev => {
+      const next = fn(prev);
+      clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => saveData(next), 400);
+      return next;
+    });
+  }
+
+  if (!data) {
+    return (
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height: 500, fontFamily:"Inter", color:"#8a897f" }}>Carregando...</div>
+    );
+  }
+
+  const TABS = [
+    { key: "inicio", icon: "home", label: "Início" },
+    { key: "lancamentos", icon: "list", label: "Lançamentos" },
+    { key: "relatorios", icon: "chart", label: "Relatórios" },
+    { key: "limites", icon: "target", label: "Limites" },
+    { key: "conta", icon: "user", label: "Conta" },
+  ];
+
+  return (
+    <div className="fin-app" data-theme={isDark ? "dark" : "light"} style={{ fontFamily: "Inter, sans-serif", maxWidth: 430, margin: "0 auto", background: "var(--bg)", minHeight: 640, position: "relative", borderRadius: 28, overflow: "hidden", boxShadow: "0 20px 60px -20px rgba(16,24,40,0.4)" }}>
+      <style>{FONT_IMPORT}{THEME_CSS}{`* { box-sizing: border-box; } select { -webkit-appearance:none; appearance:none; }`}</style>
+
+      <div style={{ position: "relative", minHeight: 640 }}>
+        {tab === "inicio" && <Inicio data={data} patch={patch} goManage={() => setTab("conta_conexoes")} setNotifOpen={setNotifOpen} onReload={reloadFromCloud} syncing={syncing} lastSync={lastSync} />}
+        {tab === "lancamentos" && <Lancamentos data={data} patch={patch} date={date} setDate={setDate} />}
+        {tab === "relatorios" && <Relatorios data={data} date={date} setDate={setDate} />}
+        {tab === "limites" && <Limites data={data} patch={patch} />}
+        {(tab === "conta" || tab === "conta_conexoes") && <Conta data={data} patch={patch} key={tab} isDark={isDark} toggleTheme={toggleTheme} />}
+
+        <Sheet open={notifOpen} onClose={()=>setNotifOpen(false)} title="Notificações">
+          {data.notifications.length === 0 && <div style={{ fontFamily:"Inter", fontSize:13.5, color:"var(--muted)" }}>Sem notificações.</div>}
+          {data.notifications.map(n => (
+            <div key={n.id} style={{ display:"flex", gap:10, padding:"10px 2px", borderBottom:"1px solid var(--border-2)" }}>
+              <div style={{ width:8, height:8, borderRadius:"50%", background: n.read ? "var(--border)" : "#A13D46", marginTop:5, flexShrink:0 }} />
+              <div style={{ fontFamily:"Inter", fontSize:13.5, color:"var(--ink-soft)" }}>{n.text}</div>
+            </div>
+          ))}
+        </Sheet>
+      </div>
+
+      {/* bottom nav */}
+      <div style={{ position: "sticky", bottom: 0, left: 0, right: 0, background: "var(--card)", borderTop: "1px solid var(--border-2)", display: "flex", padding: "8px 6px calc(8px + env(safe-area-inset-bottom))" }}>
+        {TABS.map(t => {
+          const active = tab === t.key || (t.key === "conta" && tab === "conta_conexoes");
+          return (
+            <button key={t.key} onClick={() => setTab(t.key)} style={{ flex: 1, background: "transparent", border: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "6px 0", cursor: "pointer" }}>
+              <Icon name={t.icon} color={active ? "#16283D" : "#A9A498"} size={21} />
+              <div style={{ fontFamily: "Inter", fontSize: 10, fontWeight: 600, color: active ? "#16283D" : "#A9A498" }}>{t.label}</div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<FinanceApp />);
+</script>
+</body>
+</html>
