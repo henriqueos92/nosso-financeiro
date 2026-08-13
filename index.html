@@ -92,7 +92,10 @@ function seedData() {
   const now = new Date();
   const iso = (day) => new Date(now.getFullYear(), now.getMonth(), day).toISOString().slice(0, 10);
   return {
-    profile: { name: "Dayane", partnerName: "Henrique", email: "dayane@exemplo.com", birthdate: "", photo: "" },
+    people: [
+      { id: "p1", name: "Dayane", email: "dayane@exemplo.com", birthdate: "" },
+      { id: "p2", name: "Henrique", email: "henrique@exemplo.com", birthdate: "" },
+    ],
     accounts: [
       { id: uid(), name: "NuConta", bank: "nubank", balance: 3245.8 },
       { id: uid(), name: "Itaú Conta Corrente", bank: "itau", balance: 1180.32 },
@@ -103,17 +106,12 @@ function seedData() {
       { id: uid(), name: "Itaú Click", bank: "itau", limit: 3000, closingDay: 20, dueDay: 27, invoice: 316.9 },
     ],
     transactions: [
-      { id: uid(), date: iso(2), desc: "Salário — Dayane", value: 4200, type: "receita", category: "Salário", accountId: null, status: "resolvido", fixed: true, tag: "" },
-      { id: uid(), date: iso(3), desc: "Aluguel", value: -1450, type: "despesa", category: "Casa", accountId: null, status: "resolvido", fixed: true, tag: "casa" },
-      { id: uid(), date: iso(5), desc: "Supermercado Extra", value: -389.2, type: "despesa", category: "Mercado", accountId: null, status: "resolvido", fixed: false, tag: "" },
-      { id: uid(), date: iso(6), desc: "Academia", value: -99.9, type: "despesa", category: "Cuidados pessoais", accountId: null, status: "resolvido", fixed: true, tag: "" },
-      { id: uid(), date: iso(8), desc: "iFood", value: -63.5, type: "despesa", category: "Bares e restaurante", accountId: null, status: "pendente", fixed: false, tag: "" },
-      { id: uid(), date: iso(10), desc: "Netflix", value: -39.9, type: "despesa", category: "Assinaturas e serviço", accountId: null, status: "resolvido", fixed: true, tag: "" },
-    ],
-    detected: [
-      { id: uid(), bank: "nubank", desc: "Compra no crédito — Ifd*Ifood", value: -70.0, date: todayISO(), time: "12:41" },
-      { id: uid(), bank: "itau", desc: "Pix recebido — Henrique", value: 250.0, date: todayISO(), time: "09:03" },
-      { id: uid(), bank: "caixa", desc: "Débito automático — Sanepar", value: -118.4, date: todayISO(), time: "07:15" },
+      { id: uid(), date: iso(2), desc: "Salário — Dayane", value: 4200, type: "receita", category: "Salário", accountId: null, status: "resolvido", fixed: true, tag: "", personId: "p1", createdAt: Date.now() - 9e6 },
+      { id: uid(), date: iso(3), desc: "Aluguel", value: -1450, type: "despesa", category: "Casa", accountId: null, status: "resolvido", fixed: true, tag: "casa", personId: "p2", createdAt: Date.now() - 8e6 },
+      { id: uid(), date: iso(5), desc: "Supermercado Extra", value: -389.2, type: "despesa", category: "Mercado", accountId: null, status: "resolvido", fixed: false, tag: "", personId: "p1", createdAt: Date.now() - 7e6 },
+      { id: uid(), date: iso(6), desc: "Academia", value: -99.9, type: "despesa", category: "Cuidados pessoais", accountId: null, status: "resolvido", fixed: true, tag: "", personId: "p2", createdAt: Date.now() - 6e6 },
+      { id: uid(), date: iso(8), desc: "iFood", value: -63.5, type: "despesa", category: "Bares e restaurante", accountId: null, status: "pendente", fixed: false, tag: "", personId: "p1", createdAt: Date.now() - 5e6 },
+      { id: uid(), date: iso(10), desc: "Netflix", value: -39.9, type: "despesa", category: "Assinaturas e serviço", accountId: null, status: "resolvido", fixed: true, tag: "", personId: "p2", createdAt: Date.now() - 4e6 },
     ],
     tags: ["casa"],
     limits: [
@@ -123,7 +121,6 @@ function seedData() {
     ],
     notifications: [
       { id: uid(), text: "Sua fatura Nubank fecha em 3 dias.", read: false },
-      { id: uid(), text: "Henrique adicionou um lançamento em Mercado.", read: false },
     ],
   };
 }
@@ -139,6 +136,21 @@ const JSONBIN_ID = "6a7d0166da38895dfedce2f3";
 const JSONBIN_KEY = "$2a$10$DiRKf0xhBDltF94YODaw7.MtLOXK7Bp8DyBSAZUi30zETV8zWQ2F2";
 const JSONBIN_URL = `https://api.jsonbin.io/v3/b/${JSONBIN_ID}`;
 
+// Adds fields introduced after a bin was first created, so older saved data
+// keeps working without the person having to reset anything.
+function migrateData(d) {
+  let next = d;
+  if (!next.people) {
+    next = { ...next, people: [
+      { id: "p1", name: next.profile?.name || "Pessoa 1", email: next.profile?.email || "", birthdate: next.profile?.birthdate || "" },
+      { id: "p2", name: next.profile?.partnerName || "Pessoa 2", email: "", birthdate: "" },
+    ] };
+  }
+  if (!next.tags) next = { ...next, tags: [] };
+  if (!next.notifications) next = { ...next, notifications: [] };
+  return next;
+}
+
 async function loadData() {
   try {
     const res = await fetch(`${JSONBIN_URL}/latest`, {
@@ -146,7 +158,7 @@ async function loadData() {
     });
     if (res.ok) {
       const json = await res.json();
-      if (json && json.record && json.record.profile) return json.record;
+      if (json && json.record && (json.record.people || json.record.profile)) return migrateData(json.record);
     }
   } catch (e) { console.error("Falha ao carregar dados da nuvem:", e); }
   const seed = seedData();
@@ -236,18 +248,18 @@ function MonthBar({ date, setDate, title }) {
 }
 const navBtn = { width: 34, height: 34, borderRadius: 999, border: "none", background: "var(--soft)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" };
 
-function Sheet({ open, onClose, children, title }) {
+function Sheet({ open, onClose, children, title, large }) {
   if (!open) return null;
   return (
     <div style={{ position: "absolute", inset: 0, zIndex: 40 }}>
       <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(31,30,28,0.4)" }} />
-      <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, background: "var(--card)", borderRadius: "22px 22px 0 0", padding: "14px 18px 26px", maxHeight: "78%", overflowY: "auto", boxShadow: "0 -10px 30px rgba(0,0,0,0.35)" }}>
-        <div style={{ width: 40, height: 4, borderRadius: 4, background: "var(--border)", margin: "0 auto 14px" }} />
-        {title && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+      <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, background: "var(--card)", borderRadius: "22px 22px 0 0", padding: "14px 18px 26px", maxHeight: large ? "94%" : "78%", height: large ? "94%" : "auto", overflowY: "auto", boxShadow: "0 -10px 30px rgba(0,0,0,0.35)", display: "flex", flexDirection: "column" }}>
+        <div style={{ width: 40, height: 4, borderRadius: 4, background: "var(--border)", margin: "0 auto 14px", flexShrink: 0 }} />
+        {title && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexShrink: 0 }}>
           <div style={{ fontFamily: "Source Serif 4, serif", fontSize: 19, fontWeight: 600, color: "var(--accent)" }}>{title}</div>
           <button onClick={onClose} style={{ ...navBtn, background: "transparent" }}><Icon name="x" size={20} color="var(--ink-soft)" /></button>
         </div>}
-        {children}
+        <div style={{ overflowY: "auto", flex: large ? 1 : "unset" }}>{children}</div>
       </div>
     </div>
   );
@@ -264,33 +276,33 @@ function Field({ label, children }) {
 const inputStyle = { width: "100%", boxSizing: "border-box", padding: "11px 13px", borderRadius: 12, border: "1.5px solid var(--border)", background: "var(--card)", fontFamily: "Inter", fontSize: 14.5, color: "var(--ink-soft)", outline: "none" };
 
 /* ============================================================ SCREEN: INÍCIO */
-function Inicio({ data, patch, goManage, goCards, openNotif, setNotifOpen, onReload, syncing, lastSync, isDark, toggleTheme }) {
-  const [detailFor, setDetailFor] = useState(null); // detected notification being reviewed
-  const [confirmDraft, setConfirmDraft] = useState(null);
-  const [listOpen, setListOpen] = useState(false);
+function Inicio({ data, patch, goManage, goCards, setNotifOpen, onReload, syncing, lastSync, isDark, toggleTheme, myPersonId, myPerson, partnerName }) {
   const [faturasOpen, setFaturasOpen] = useState(false);
+  const [partnerOpen, setPartnerOpen] = useState(false);
+  const [lastSeenPartner, setLastSeenPartner] = useState(() => {
+    try { return Number(localStorage.getItem("financeiro-casal:partner-seen")) || 0; } catch (e) { return 0; }
+  });
 
   const saldoGeral = data.accounts.reduce((s, a) => s + a.balance, 0);
   const totalFaturas = data.cards.reduce((s, c) => s + c.invoice, 0);
   const unread = data.notifications.filter(n => !n.read).length;
 
-  function startLancar(det) {
-    setConfirmDraft({
-      desc: det.desc, value: det.value, date: det.date,
-      type: det.value >= 0 ? "receita" : "despesa",
-      category: det.value >= 0 ? "Outras receitas" : "Outros",
-      accountId: data.accounts[0]?.id || null,
-    });
-    setDetailFor(null);
+  const partnerNew = data.transactions
+    .filter(t => t.personId && t.personId !== myPersonId && (t.createdAt || 0) > lastSeenPartner)
+    .sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
+
+  function bankFor(t) {
+    if (t.cardId) return data.cards.find(c => c.id === t.cardId)?.bank;
+    if (t.accountId) return data.accounts.find(a => a.id === t.accountId)?.bank;
+    return null;
   }
-  function confirmLancamento() {
-    const t = { id: uid(), status: "resolvido", fixed: false, tag: "", ...confirmDraft };
-    patch(d => applyTxEffect({
-      ...d,
-      transactions: [t, ...d.transactions],
-      detected: d.detected.filter(x => x.desc !== confirmDraft.__srcDesc),
-    }, t, 1));
-    setConfirmDraft(null);
+  const partnerBanks = [...new Set(partnerNew.map(bankFor).filter(Boolean))];
+
+  function markPartnerSeen() {
+    const now = Date.now();
+    try { localStorage.setItem("financeiro-casal:partner-seen", String(now)); } catch (e) {}
+    setLastSeenPartner(now);
+    setPartnerOpen(false);
   }
 
   return (
@@ -298,11 +310,11 @@ function Inicio({ data, patch, goManage, goCards, openNotif, setNotifOpen, onRel
       {/* header */}
       <div style={{ padding: "22px 18px 8px", display: "flex", alignItems: "center", gap: 12 }}>
         <div style={{ width: 46, height: 46, borderRadius: "50%", background: "#16283D", color: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Source Serif 4, serif", fontSize: 18, fontWeight: 600 }}>
-          {data.profile.name.slice(0,1)}
+          {(myPerson?.name || "?").slice(0,1)}
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ fontFamily: "Inter", fontSize: 12, color: "var(--label)", fontWeight: 600 }}>Bom dia,</div>
-          <div style={{ fontFamily: "Source Serif 4, serif", fontSize: 19, fontWeight: 600, color: "var(--accent)" }}>{data.profile.name}</div>
+          <div style={{ fontFamily: "Source Serif 4, serif", fontSize: 19, fontWeight: 600, color: "var(--accent)" }}>{myPerson?.name || "Você"}</div>
         </div>
         <button onClick={toggleTheme} title={isDark ? "Modo claro" : "Modo escuro"} style={{ ...navBtn, width: 40, height: 40, background: "var(--soft)" }}>
           <Icon name={isDark ? "sun" : "moon"} color="var(--accent)" size={18} />
@@ -319,50 +331,49 @@ function Inicio({ data, patch, goManage, goCards, openNotif, setNotifOpen, onRel
         {syncing ? "Sincronizando..." : `Atualizado às ${lastSync.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}`}
       </div>
 
-      {/* lançamentos disponíveis */}
-      <div style={{ padding: "16px 18px 6px" }}>
-        <div style={{ fontFamily: "Inter", fontSize: 12, letterSpacing: 1, textTransform: "uppercase", color: "var(--label)", fontWeight: 700, marginBottom: 8 }}>
-          Lançamentos disponíveis {data.detected.length > 0 && `· ${data.detected.length}`}
-        </div>
-        {data.detected.length === 0 ? (
-          <Card><div style={{ fontFamily: "Inter", fontSize: 13.5, color: "var(--muted)" }}>Nenhum lançamento novo detectado por enquanto.</div></Card>
-        ) : (
+      {/* lançamentos do parceiro(a) */}
+      {partnerNew.length > 0 && (
+        <div style={{ padding: "16px 18px 6px" }}>
+          <div style={{ fontFamily: "Inter", fontSize: 12, letterSpacing: 1, textTransform: "uppercase", color: "var(--label)", fontWeight: 700, marginBottom: 8 }}>
+            Lançamentos disponíveis · {partnerNew.length}
+          </div>
           <Card style={{ display: "flex", alignItems: "center", gap: 12, padding: 14 }}>
             <div style={{ display: "flex" }}>
-              {[...new Set(data.detected.map(d => d.bank))].slice(0, 4).map((bank, i) => (
-                <div key={bank} style={{ marginLeft: i === 0 ? 0 : -12, border: "2px solid #FFFFFF", borderRadius: 12, position: "relative", zIndex: 10 - i }}>
+              {(partnerBanks.length ? partnerBanks : ["nubank"]).slice(0, 4).map((bank, i) => (
+                <div key={bank} style={{ marginLeft: i === 0 ? 0 : -12, border: "2px solid var(--card)", borderRadius: 12, position: "relative", zIndex: 10 - i }}>
                   <BankBadge bank={bank} size={38} />
                 </div>
               ))}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontFamily: "Inter", fontSize: 13.5, fontWeight: 700, color: "var(--ink)" }}>{data.detected.length} novo(s) detectado(s)</div>
-              <div style={{ fontFamily: "Inter", fontSize: 11.5, color: "var(--muted-2)" }}>{[...new Set(data.detected.map(d => BANKS[d.bank]?.name))].join(" · ")}</div>
+              <div style={{ fontFamily: "Inter", fontSize: 13.5, fontWeight: 700, color: "var(--ink)" }}>{partnerNew.length} novo(s) de {partnerName || "seu par"}</div>
+              <div style={{ fontFamily: "Inter", fontSize: 11.5, color: "var(--muted-2)" }}>Toque em visualizar pra ver o que foi lançado</div>
             </div>
-            <button onClick={() => setListOpen(true)} style={{ border: "1.5px solid var(--accent)", background: "transparent", color: "var(--accent)", borderRadius: 10, padding: "8px 14px", fontFamily: "Inter", fontSize: 12.5, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>Visualizar</button>
+            <button onClick={() => setPartnerOpen(true)} style={{ border: "1.5px solid var(--accent)", background: "transparent", color: "var(--accent)", borderRadius: 10, padding: "8px 14px", fontFamily: "Inter", fontSize: 12.5, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>Visualizar</button>
           </Card>
-        )}
-      </div>
+        </div>
+      )}
 
-      <Sheet open={listOpen} onClose={() => setListOpen(false)} title="Lançamentos detectados">
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {data.detected.map(det => (
-            <Card key={det.id} onClick={() => { setListOpen(false); setDetailFor(det); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, cursor: "pointer" }}>
-              <BankBadge bank={det.bank} size={36} />
+      <Sheet open={partnerOpen} onClose={() => setPartnerOpen(false)} title={`Lançamentos de ${partnerName || "seu par"}`}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+          {partnerNew.map(t => (
+            <Card key={t.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: 12 }}>
+              <BankBadge bank={bankFor(t) || "nubank"} size={36} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontFamily: "Inter", fontSize: 13.5, fontWeight: 600, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{det.desc}</div>
-                <div style={{ fontFamily: "IBM Plex Mono", fontSize: 12, color: "var(--muted-2)" }}>{BANKS[det.bank]?.name} · {det.time}</div>
+                <div style={{ fontFamily: "Inter", fontSize: 13.5, fontWeight: 600, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.desc}</div>
+                <div style={{ fontFamily: "Inter", fontSize: 12, color: "var(--muted-2)" }}>{t.category} · {t.date.split("-").reverse().join("/")}</div>
               </div>
-              <div style={{ fontFamily: "IBM Plex Mono", fontSize: 14, fontWeight: 600, color: det.value >= 0 ? "#1E7F63" : "#A13D46" }}>{brl(det.value)}</div>
+              <div style={{ fontFamily: "IBM Plex Mono", fontSize: 14, fontWeight: 600, color: t.value >= 0 ? "#1E7F63" : "#A13D46" }}>{brl(t.value)}</div>
             </Card>
           ))}
         </div>
+        <button onClick={markPartnerSeen} style={primaryBtn}>OK, já vi</button>
       </Sheet>
 
       {/* saldo geral */}
       <div style={{ padding: "18px 18px 0" }}>
         <Card style={{ background: "#16283D", color: "#FFFFFF" }}>
-          <div style={{ fontFamily: "Inter", fontSize: 12, color: "#AAB8C4", fontWeight: 600, marginBottom: 4 }}>Saldo geral</div>
+          <div style={{ fontFamily: "Inter", fontSize: 12, color: "#AAB8C4", fontWeight: 600, marginBottom: 4 }}>Saldo geral (vocês dois)</div>
           <div style={{ fontFamily: "Source Serif 4, serif", fontSize: 30, fontWeight: 600 }}>{brl(saldoGeral)}</div>
           <div style={{ marginTop: 8, height: 1, background: "repeating-linear-gradient(90deg,#3A5066 0 6px,transparent 6px 12px)" }} />
         </Card>
@@ -385,6 +396,9 @@ function Inicio({ data, patch, goManage, goCards, openNotif, setNotifOpen, onRel
               <div style={{ fontFamily: "IBM Plex Mono", fontSize: 14, fontWeight: 600, color: "var(--ink-soft)" }}>{brl(a.balance)}</div>
             </Card>
           ))}
+          {data.accounts.length === 0 && (
+            <Card><div style={{ fontFamily: "Inter", fontSize: 13.5, color: "var(--muted)" }}>Nenhuma conta cadastrada. Toque em "Gerenciar contas" pra adicionar.</div></Card>
+          )}
         </div>
       </div>
 
@@ -416,56 +430,28 @@ function Inicio({ data, patch, goManage, goCards, openNotif, setNotifOpen, onRel
         </div>
         <button onClick={() => { setFaturasOpen(false); goCards(); }} style={{ ...primaryBtn, marginTop: 14 }}>Ver todos os cartões</button>
       </Sheet>
-
-      <Sheet open={!!detailFor} onClose={() => setDetailFor(null)} title="Lançamento detectado">
-        {detailFor && (
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-              <BankBadge bank={detailFor.bank} size={44} />
-              <div>
-                <div style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 14.5 }}>{detailFor.desc}</div>
-                <div style={{ fontFamily: "Inter", fontSize: 12, color: "var(--muted-2)" }}>{BANKS[detailFor.bank]?.name} · {detailFor.date} às {detailFor.time}</div>
-              </div>
-            </div>
-            <div style={{ fontFamily: "IBM Plex Mono", fontSize: 26, fontWeight: 600, color: detailFor.value >= 0 ? "#1E7F63" : "#A13D46", marginBottom: 18 }}>{brl(detailFor.value)}</div>
-            <button onClick={() => startLancar({ ...detailFor, __srcDesc: detailFor.desc })} style={primaryBtn}>Lançar na despesa mensal</button>
-          </div>
-        )}
-      </Sheet>
-
-      <Sheet open={!!confirmDraft} onClose={() => setConfirmDraft(null)} title="Confirmar lançamento">
-        {confirmDraft && (
-          <div>
-            <Field label="Descrição"><input style={inputStyle} value={confirmDraft.desc} onChange={e => setConfirmDraft({ ...confirmDraft, desc: e.target.value })} /></Field>
-            <Field label="Valor"><input style={inputStyle} type="number" value={confirmDraft.value} onChange={e => setConfirmDraft({ ...confirmDraft, value: parseFloat(e.target.value) || 0 })} /></Field>
-            <Field label="Categoria">
-              <select style={inputStyle} value={confirmDraft.category} onChange={e => setConfirmDraft({ ...confirmDraft, category: e.target.value })}>
-                {(confirmDraft.type === "receita" ? RECEITA_CATS : DESPESA_CATS).map(c => <option key={c}>{c}</option>)}
-              </select>
-            </Field>
-            <Field label="Conta">
-              <select style={inputStyle} value={confirmDraft.accountId || ""} onChange={e => setConfirmDraft({ ...confirmDraft, accountId: e.target.value })}>
-                {data.accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </select>
-            </Field>
-            <button onClick={confirmLancamento} style={primaryBtn}>Confirmar lançamento</button>
-          </div>
-        )}
-      </Sheet>
     </div>
   );
 }
 const primaryBtn = { width: "100%", padding: "13px", borderRadius: 13, border: "none", background: "#16283D", color: "#FFFFFF", fontFamily: "Inter", fontWeight: 700, fontSize: 14.5, cursor: "pointer" };
+
 const secondaryBtn = { width: "100%", padding: "13px", borderRadius: 13, border: "1.5px solid #A13D46", background: "transparent", color: "#A13D46", fontFamily: "Inter", fontWeight: 700, fontSize: 14.5, cursor: "pointer" };
 
 /* ============================================================ SCREEN: LANÇAMENTOS (fluxo de caixa) */
 const blankNewTx = () => ({
   desc: "", value: "", type: "despesa", category: DESPESA_CATS[0], accountId: "",
   paymentMethod: "conta", cardId: "",
-  date: todayISO(), fixed: false, isInstallment: false, totalParcelas: 2, currentParcela: 1, tag: "",
+  date: todayISO(), repeatType: "none", // none | installment | fixed
+  totalParcelas: 2, currentParcela: 1, repeatMonths: 12, tag: "",
 });
 
-function Lancamentos({ data, patch, date, setDate }) {
+const PAYMENT_METHODS = [
+  ["conta", "Conta (débito)"], ["cartao", "Cartão de crédito"], ["pix", "Pix"],
+  ["vale_alimentacao", "Vale Alimentação"], ["vale_refeicao", "Vale Refeição"],
+];
+const paymentLabel = (m) => (PAYMENT_METHODS.find(p => p[0] === m) || [,""])[1];
+
+function Lancamentos({ data, patch, date, setDate, myPersonId }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [mode, setMode] = useState("normal"); // normal | select | search | filter | period
   const [selected, setSelected] = useState([]);
@@ -474,24 +460,50 @@ function Lancamentos({ data, patch, date, setDate }) {
   const [period, setPeriod] = useState("mes");
   const [newTxOpen, setNewTxOpen] = useState(false);
   const [newTx, setNewTx] = useState(blankNewTx());
+  const [editingId, setEditingId] = useState(null);
+  const [actionFor, setActionFor] = useState(null); // tx tapped for quick actions
+
+  function openNew() { setNewTx(blankNewTx()); setEditingId(null); setNewTxOpen(true); }
+  function openEdit(tx) {
+    setNewTx({
+      desc: tx.desc, value: String(Math.abs(tx.value)), type: tx.type, category: tx.category,
+      accountId: tx.accountId || "", paymentMethod: tx.cardId ? "cartao" : (tx.paymentMethod || "conta"),
+      cardId: tx.cardId || "", date: tx.date, repeatType: "none",
+      totalParcelas: 2, currentParcela: 1, repeatMonths: 12, tag: tx.tag || "",
+    });
+    setEditingId(tx.id);
+    setActionFor(null);
+    setNewTxOpen(true);
+  }
+  function deleteOne(tx) {
+    patch(d => {
+      const next = applyTxEffect(d, tx, -1);
+      return { ...next, transactions: next.transactions.filter(t => t.id !== tx.id) };
+    });
+    setActionFor(null);
+  }
 
   function saveNewTx() {
     if (!newTx.desc || !newTx.value) return;
     const totalVal = parseFloat(newTx.value);
     if (!totalVal) return;
     const viaCard = newTx.type === "despesa" && newTx.paymentMethod === "cartao";
-    const accountId = viaCard ? null : (newTx.accountId || data.accounts[0]?.id || null);
+    const accountId = viaCard ? null : (["conta", "pix"].includes(newTx.paymentMethod) ? (newTx.accountId || data.accounts[0]?.id || null) : null);
     const cardId = viaCard ? (newTx.cardId || data.cards[0]?.id || null) : null;
+    const common = { type: newTx.type, category: newTx.category, accountId, cardId, tag: newTx.tag || "", paymentMethod: newTx.paymentMethod, personId: myPersonId, createdAt: Date.now() };
 
-    if (!newTx.isInstallment) {
-      const t = {
-        id: uid(), date: newTx.date, desc: newTx.desc,
-        value: newTx.type === "despesa" ? -Math.abs(totalVal) : Math.abs(totalVal),
-        type: newTx.type, category: newTx.category, accountId, cardId, status: "resolvido",
-        fixed: newTx.fixed, tag: newTx.tag || "",
-      };
-      patch(d => applyTxEffect({ ...d, transactions: [t, ...d.transactions] }, t, 1));
-    } else {
+    if (editingId) {
+      patch(d => {
+        const old = d.transactions.find(t => t.id === editingId);
+        if (!old) return d;
+        let next = applyTxEffect(d, old, -1);
+        const updated = { ...old, desc: newTx.desc, date: newTx.date, value: newTx.type === "despesa" ? -Math.abs(totalVal) : Math.abs(totalVal), ...common };
+        next = { ...next, transactions: next.transactions.map(t => t.id === editingId ? updated : t) };
+        next = applyTxEffect(next, updated, 1);
+        return next;
+      });
+      setEditingId(null);
+    } else if (newTx.repeatType === "installment") {
       const parcelas = Math.max(1, parseInt(newTx.totalParcelas) || 1);
       const atual = Math.min(parcelas, Math.max(1, parseInt(newTx.currentParcela) || 1));
       const valorParcela = totalVal / parcelas;
@@ -502,14 +514,10 @@ function Lancamentos({ data, patch, date, setDate }) {
         const offset = i - atual;
         const d2 = new Date(base.getFullYear(), base.getMonth() + offset, base.getDate());
         novas.push({
-          id: uid(),
-          date: d2.toISOString().slice(0, 10),
-          desc: newTx.desc,
+          id: uid(), date: d2.toISOString().slice(0, 10), desc: newTx.desc,
           value: newTx.type === "despesa" ? -valorParcela : valorParcela,
-          type: newTx.type, category: newTx.category, accountId, cardId,
-          status: i <= atual ? "resolvido" : "pendente",
-          fixed: false, tag: newTx.tag || "",
-          installment: { groupId, current: i, total: parcelas, liveAt: atual },
+          status: i <= atual ? "resolvido" : "pendente", fixed: false,
+          installment: { groupId, current: i, total: parcelas, liveAt: atual }, ...common,
         });
       }
       patch(d => {
@@ -517,6 +525,24 @@ function Lancamentos({ data, patch, date, setDate }) {
         novas.forEach(t => { next = applyTxEffect(next, t, 1); });
         return next;
       });
+    } else if (newTx.repeatType === "fixed") {
+      const months = Math.max(1, parseInt(newTx.repeatMonths) || 12);
+      const groupId = uid();
+      const base = new Date(newTx.date + "T00:00:00");
+      const novas = [];
+      for (let i = 0; i < months; i++) {
+        const d2 = new Date(base.getFullYear(), base.getMonth() + i, base.getDate());
+        novas.push({
+          id: uid(), date: d2.toISOString().slice(0, 10), desc: newTx.desc,
+          value: newTx.type === "despesa" ? -Math.abs(totalVal) : Math.abs(totalVal),
+          status: i === 0 ? "resolvido" : "pendente", fixed: true,
+          recurring: { groupId, index: i, total: months }, ...common,
+        });
+      }
+      patch(d => applyTxEffect({ ...d, transactions: [...novas, ...d.transactions] }, novas[0], 1));
+    } else {
+      const t = { id: uid(), date: newTx.date, desc: newTx.desc, value: newTx.type === "despesa" ? -Math.abs(totalVal) : Math.abs(totalVal), status: "resolvido", fixed: false, ...common };
+      patch(d => applyTxEffect({ ...d, transactions: [t, ...d.transactions] }, t, 1));
     }
     setNewTxOpen(false);
     setNewTx(blankNewTx());
@@ -563,7 +589,7 @@ function Lancamentos({ data, patch, date, setDate }) {
   const allCats = [...DESPESA_CATS, ...RECEITA_CATS];
 
   return (
-    <div style={{ paddingBottom: 100, position: "relative" }}>
+    <div style={{ paddingBottom: 100 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 18px 0" }}>
         {mode === "select" ? (
           <>
@@ -605,9 +631,9 @@ function Lancamentos({ data, patch, date, setDate }) {
             <div style={{ fontFamily: "IBM Plex Mono", fontSize: 11.5, color: "var(--muted-2)", marginBottom: 6 }}>{new Date(d).toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "short" })}</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {items.map(t => (
-                <Card key={t.id} onClick={() => mode === "select" ? toggleSel(t.id) : null}
-                  style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, cursor: mode==="select"?"pointer":"default",
-                    border: selected.includes(t.id) ? "1.5px solid #16283D" : "1.5px solid transparent" }}>
+                <Card key={t.id} onClick={() => mode === "select" ? toggleSel(t.id) : setActionFor(t)}
+                  style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, cursor: "pointer",
+                    border: selected.includes(t.id) ? "1.5px solid var(--accent)" : "1.5px solid transparent" }}>
                   {mode === "select" && (
                     <div style={{ width: 20, height: 20, borderRadius: 6, border: "1.5px solid var(--accent)", background: selected.includes(t.id) ? "var(--accent)" : "transparent", display:"flex",alignItems:"center",justifyContent:"center", flexShrink:0 }}>
                       {selected.includes(t.id) && <Icon name="check" size={13} color="#fff" />}
@@ -683,12 +709,12 @@ function Lancamentos({ data, patch, date, setDate }) {
 
       {/* botão flutuante novo lançamento */}
       {mode === "normal" && (
-        <button onClick={() => { setNewTx(blankNewTx()); setNewTxOpen(true); }} style={{ position: "absolute", right: 18, bottom: 18, width: 50, height: 50, borderRadius: "50%", border: "none", background: "#16283D", boxShadow: "0 10px 24px -8px rgba(22,40,61,0.55)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+        <button onClick={openNew} style={{ position: "absolute", right: 18, bottom: 18, width: 52, height: 52, borderRadius: "50%", border: "none", background: "#16283D", boxShadow: "0 10px 24px -8px rgba(22,40,61,0.55)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", zIndex: 20 }}>
           <Icon name="plus" color="#fff" size={22} />
         </button>
       )}
 
-      <Sheet open={newTxOpen} onClose={() => setNewTxOpen(false)} title="Novo lançamento">
+      <Sheet open={newTxOpen} onClose={() => { setNewTxOpen(false); setEditingId(null); }} title={editingId ? "Editar lançamento" : "Novo lançamento"} large>
         <Field label="Tipo">
           <div style={{ display: "flex", gap: 8 }}>
             {[["despesa","Despesa"],["receita","Receita"],["transferencia","Transferência"]].map(([v,l]) => (
@@ -697,7 +723,7 @@ function Lancamentos({ data, patch, date, setDate }) {
           </div>
         </Field>
         <Field label="Descrição"><input style={inputStyle} placeholder="Ex: Panela elétrica" value={newTx.desc} onChange={e => setNewTx({ ...newTx, desc: e.target.value })} /></Field>
-        <Field label={newTx.isInstallment ? "Valor total da compra" : "Valor"}><input style={inputStyle} type="number" placeholder="0,00" value={newTx.value} onChange={e => setNewTx({ ...newTx, value: e.target.value })} /></Field>
+        <Field label={newTx.repeatType === "installment" ? "Valor total da compra" : "Valor"}><input style={inputStyle} type="number" placeholder="0,00" value={newTx.value} onChange={e => setNewTx({ ...newTx, value: e.target.value })} /></Field>
         <Field label="Categoria">
           <select style={inputStyle} value={newTx.category} onChange={e => setNewTx({ ...newTx, category: e.target.value })}>
             {(newTx.type === "receita" ? RECEITA_CATS : DESPESA_CATS).map(c => <option key={c}>{c}</option>)}
@@ -705,20 +731,22 @@ function Lancamentos({ data, patch, date, setDate }) {
         </Field>
         {newTx.type === "despesa" && (
           <Field label="Forma de pagamento">
-            <div style={{ display: "flex", gap: 8 }}>
-              <Pill active={newTx.paymentMethod === "conta"} onClick={() => setNewTx({ ...newTx, paymentMethod: "conta" })}>Conta (débito)</Pill>
-              <Pill active={newTx.paymentMethod === "cartao"} onClick={() => setNewTx({ ...newTx, paymentMethod: "cartao" })}>Cartão de crédito</Pill>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {PAYMENT_METHODS.map(([v,l]) => (
+                <Pill key={v} active={newTx.paymentMethod === v} onClick={() => setNewTx({ ...newTx, paymentMethod: v })}>{l}</Pill>
+              ))}
             </div>
           </Field>
         )}
-        {newTx.type === "despesa" && newTx.paymentMethod === "cartao" ? (
+        {newTx.type === "despesa" && newTx.paymentMethod === "cartao" && (
           <Field label="Cartão">
             <select style={inputStyle} value={newTx.cardId} onChange={e => setNewTx({ ...newTx, cardId: e.target.value })}>
               <option value="">Selecione</option>
               {data.cards.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </Field>
-        ) : (
+        )}
+        {(newTx.type !== "despesa" || ["conta","pix"].includes(newTx.paymentMethod)) && (
           <Field label="Conta">
             <select style={inputStyle} value={newTx.accountId} onChange={e => setNewTx({ ...newTx, accountId: e.target.value })}>
               <option value="">Selecione</option>
@@ -726,23 +754,24 @@ function Lancamentos({ data, patch, date, setDate }) {
             </select>
           </Field>
         )}
-        <Field label={newTx.isInstallment ? "Data desta parcela" : "Data"}><input style={inputStyle} type="date" value={newTx.date} onChange={e => setNewTx({ ...newTx, date: e.target.value })} /></Field>
-
-        <Field label="É um lançamento fixo?">
-          <div style={{ display: "flex", gap: 8 }}>
-            <Pill active={newTx.fixed} onClick={() => setNewTx({ ...newTx, fixed: true })}>Sim</Pill>
-            <Pill active={!newTx.fixed} onClick={() => setNewTx({ ...newTx, fixed: false })}>Não</Pill>
+        {newTx.type === "despesa" && ["vale_alimentacao","vale_refeicao"].includes(newTx.paymentMethod) && (
+          <div style={{ fontFamily: "Inter", fontSize: 11.5, color: "var(--muted-2)", marginBottom: 14 }}>
+            Esse lançamento fica registrado com a forma de pagamento "{paymentLabel(newTx.paymentMethod)}" para relatórios, mas não desconta de nenhuma conta (ainda não temos um saldo de vale cadastrado no app).
           </div>
-        </Field>
+        )}
+        <Field label={newTx.repeatType === "installment" ? "Data desta parcela" : "Data"}><input style={inputStyle} type="date" value={newTx.date} onChange={e => setNewTx({ ...newTx, date: e.target.value })} /></Field>
 
-        <Field label="É parcelado?">
-          <div style={{ display: "flex", gap: 8 }}>
-            <Pill active={newTx.isInstallment} onClick={() => setNewTx({ ...newTx, isInstallment: true })}>Sim</Pill>
-            <Pill active={!newTx.isInstallment} onClick={() => setNewTx({ ...newTx, isInstallment: false })}>Não</Pill>
-          </div>
-        </Field>
+        {!editingId && (
+          <Field label="Repetição">
+            <div style={{ display: "flex", gap: 8 }}>
+              <Pill active={newTx.repeatType === "none"} onClick={() => setNewTx({ ...newTx, repeatType: "none" })}>Única vez</Pill>
+              <Pill active={newTx.repeatType === "installment"} onClick={() => setNewTx({ ...newTx, repeatType: "installment" })}>Parcelado</Pill>
+              <Pill active={newTx.repeatType === "fixed"} onClick={() => setNewTx({ ...newTx, repeatType: "fixed" })}>Fixo (recorrente)</Pill>
+            </div>
+          </Field>
+        )}
 
-        {newTx.isInstallment && (
+        {!editingId && newTx.repeatType === "installment" && (
           <div style={{ background: "var(--soft)", borderRadius: 14, padding: 14, marginBottom: 14 }}>
             <div style={{ display: "flex", gap: 10 }}>
               <div style={{ flex: 1 }}>
@@ -753,10 +782,19 @@ function Lancamentos({ data, patch, date, setDate }) {
               </div>
             </div>
             {newTx.value && newTx.totalParcelas > 0 && (
-              <div style={{ fontFamily: "Inter", fontSize: 12.5, color: "#3E5C76" }}>
+              <div style={{ fontFamily: "Inter", fontSize: 12.5, color: "var(--muted)" }}>
                 {parseInt(newTx.totalParcelas) || 0}x de {brl((parseFloat(newTx.value)||0)/(parseInt(newTx.totalParcelas)||1))}. Vamos lançar a parcela {newTx.currentParcela} em {newTx.date?.split("-").reverse().join("/")}, gerando automaticamente as parcelas anteriores (já pagas) e as seguintes (pendentes) nos meses corretos.
               </div>
             )}
+          </div>
+        )}
+
+        {!editingId && newTx.repeatType === "fixed" && (
+          <div style={{ background: "var(--soft)", borderRadius: 14, padding: 14, marginBottom: 14 }}>
+            <Field label="Por quantos meses se repete?"><input style={inputStyle} type="number" min="1" value={newTx.repeatMonths} onChange={e => setNewTx({ ...newTx, repeatMonths: e.target.value })} /></Field>
+            <div style={{ fontFamily: "Inter", fontSize: 12.5, color: "var(--muted)" }}>
+              Vamos gerar esse lançamento de {brl(parseFloat(newTx.value)||0)} todo mês, a partir de {newTx.date?.split("-").reverse().join("/")}, por {newTx.repeatMonths || 0} meses seguidos.
+            </div>
           </div>
         )}
 
@@ -767,7 +805,7 @@ function Lancamentos({ data, patch, date, setDate }) {
           </select>
         </Field>
 
-        <button onClick={saveNewTx} style={primaryBtn}>Salvar lançamento</button>
+        <button onClick={saveNewTx} style={primaryBtn}>{editingId ? "Salvar alterações" : "Salvar lançamento"}</button>
       </Sheet>
 
       {/* bottom bar de seleção */}
@@ -778,9 +816,30 @@ function Lancamentos({ data, patch, date, setDate }) {
             <div style={{ fontFamily:"IBM Plex Mono", fontSize:16, fontWeight:700, color:"#fff" }}>{brl(selTotal)}</div>
           </div>
           <button onClick={deleteSelected} style={{ width:38, height:38, borderRadius:10, border:"none", background:"#A13D46", display:"flex",alignItems:"center",justifyContent:"center", cursor:"pointer" }}><Icon name="trash" size={17} color="#fff" /></button>
-          <button style={{ padding:"9px 16px", borderRadius:10, border:"1.5px solid #fff", background:"transparent", color:"#fff", fontFamily:"Inter", fontWeight:700, fontSize:13, cursor:"pointer" }}>Alterar</button>
+          {selected.length === 1 && (
+            <button onClick={() => { const tx = data.transactions.find(t=>t.id===selected[0]); setMode("normal"); setSelected([]); if (tx) openEdit(tx); }} style={{ padding:"9px 16px", borderRadius:10, border:"1.5px solid #fff", background:"transparent", color:"#fff", fontFamily:"Inter", fontWeight:700, fontSize:13, cursor:"pointer" }}>Alterar</button>
+          )}
         </div>
       )}
+
+      {/* ações rápidas ao tocar num lançamento */}
+      <Sheet open={!!actionFor} onClose={() => setActionFor(null)}>
+        {actionFor && (
+          <div>
+            <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:16, paddingBottom:14, borderBottom:"1px solid var(--border)" }}>
+              <div style={{ width:8, height:8, borderRadius:"50%", background: actionFor.type==="despesa"?"#A13D46":actionFor.type==="receita"?"#1E7F63":"#A9834B" }} />
+              <div style={{ flex:1 }}>
+                <div style={{ fontFamily:"Inter", fontSize:14, fontWeight:700 }}>{actionFor.desc}</div>
+                <div style={{ fontFamily:"Inter", fontSize:11.5, color:"var(--muted-2)" }}>{actionFor.category}</div>
+              </div>
+              <div style={{ fontFamily:"IBM Plex Mono", fontSize:15, fontWeight:600, color: actionFor.value>=0?"#1E7F63":"#A13D46" }}>{brl(actionFor.value)}</div>
+            </div>
+            <button onClick={() => openEdit(actionFor)} style={{ ...primaryBtn, marginBottom: 10, display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}><Icon name="edit" size={16} color="#fff" /> Alterar lançamento</button>
+            <button onClick={() => deleteOne(actionFor)} style={{ ...secondaryBtn, marginBottom: 10, display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}><Icon name="trash" size={16} color="#A13D46" /> Excluir lançamento</button>
+            <button onClick={() => setActionFor(null)} style={{ width:"100%", padding:"13px", borderRadius:13, border:"none", background:"transparent", color:"var(--muted)", fontFamily:"Inter", fontWeight:600, fontSize:14, cursor:"pointer" }}>Cancelar</button>
+          </div>
+        )}
+      </Sheet>
     </div>
   );
 }
@@ -805,6 +864,7 @@ function Relatorios({ data, date, setDate }) {
 
   const palette = ["#16283D","#1E7F63","#A13D46","#A9834B","#3E5C76","#5B6B7C","#6B7B8C","#8C6D46"];
   let acc = 0;
+  const gap = despesasPorCat.length > 1 ? 1.6 : 0;
   const slices = despesasPorCat.map(([cat,val],i) => {
     const frac = totalDespesas ? val/totalDespesas : 0;
     const start = acc; acc += frac;
@@ -843,11 +903,13 @@ function Relatorios({ data, date, setDate }) {
               <div style={{ fontFamily:"Inter", fontSize:13.5, color:"var(--muted)", textAlign:"center", padding:"20px 0" }}>Sem despesas neste período.</div>
             ) : (
               <div style={{ display:"flex", alignItems:"center", gap: 22, flexWrap: "wrap", justifyContent:"center" }}>
-                <svg width="160" height="160" viewBox="0 0 32 32" style={{ transform: "rotate(-90deg)" }}>
+                <svg width="168" height="168" viewBox="0 0 32 32" style={{ transform: "rotate(-90deg)" }}>
+                  <circle r="16" cx="16" cy="16" fill="transparent" stroke="var(--soft)" strokeWidth="6" />
                   {slices.map(s => {
-                    const dash = `${s.frac*100} ${100-s.frac*100}`;
+                    const len = Math.max(0, s.frac*100 - gap);
+                    const dash = `${len} ${100-len}`;
                     const offset = 100 - s.start*100;
-                    return <circle key={s.cat} r="16" cx="16" cy="16" fill="transparent" stroke={s.color} strokeWidth="6.5" strokeDasharray={dash} strokeDashoffset={offset} pathLength="100" />;
+                    return <circle key={s.cat} r="16" cx="16" cy="16" fill="transparent" stroke={s.color} strokeWidth="6" strokeLinecap="round" strokeDasharray={dash} strokeDashoffset={offset} pathLength="100" />;
                   })}
                 </svg>
                 <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
@@ -867,16 +929,16 @@ function Relatorios({ data, date, setDate }) {
 
       {tab === "balanco" && (
         <div style={{ padding: "18px 18px 0" }}>
-          <Card>
-            <div style={{ display:"flex", alignItems:"flex-end", gap: 26, height: 150, justifyContent:"center", paddingTop: 10 }}>
+          <Card style={{ padding: "24px 12px 20px" }}>
+            <div style={{ display:"flex", alignItems:"flex-end", gap: 12, height: 180, justifyContent:"center" }}>
               {[["Receitas",receitas,"#1E7F63"],["Despesas",despesas,"#A13D46"],["Saldo",Math.abs(saldo), saldo>=0?"#16283D":"#A13D46"]].map(([lab,val,color]) => {
                 const max = Math.max(receitas,despesas,Math.abs(saldo),1);
                 const h = Math.max(6,(val/max)*120);
                 return (
-                  <div key={lab} style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:8 }}>
-                    <div style={{ fontFamily:"IBM Plex Mono", fontSize:11.5, color:"var(--ink-soft)" }}>{brl(val)}</div>
-                    <div style={{ width: 40, height: h, background: color, borderRadius: 8 }} />
-                    <div style={{ fontFamily:"Inter", fontSize:12, fontWeight:600, color:"var(--muted)" }}>{lab}</div>
+                  <div key={lab} style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:8, width: 92, minWidth: 92 }}>
+                    <div style={{ fontFamily:"IBM Plex Mono", fontSize:12, fontWeight:600, color:"var(--ink-soft)", textAlign:"center", lineHeight:1.3 }}>{brl(val)}</div>
+                    <div style={{ width: 44, height: h, background: color, borderRadius: 8 }} />
+                    <div style={{ fontFamily:"Inter", fontSize:12.5, fontWeight:600, color:"var(--muted)" }}>{lab}</div>
                   </div>
                 );
               })}
@@ -1004,9 +1066,9 @@ function Limites({ data, patch }) {
 }
 
 /* ============================================================ SCREEN: CONTA */
-function Conta({ data, patch, isDark, toggleTheme, initialScreen }) {
+function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, myPerson, switchPerson }) {
   const [screen, setScreen] = useState(initialScreen || "main"); // main | edit | conexoes | cartoes | categorias | tags
-  const [editDraft, setEditDraft] = useState(data.profile);
+  const [editDraft, setEditDraft] = useState(myPerson || { name: "", email: "", birthdate: "" });
   const [addingCard, setAddingCard] = useState(false);
   const [cardDraft, setCardDraft] = useState({ name:"", bank:"nubank", limit:"" });
   const [newCat, setNewCat] = useState("");
@@ -1067,7 +1129,7 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen }) {
           <Field label="E-mail"><input style={inputStyle} value={editDraft.email} onChange={e=>setEditDraft({...editDraft,email:e.target.value})} /></Field>
           <Field label="Senha"><input style={inputStyle} type="password" placeholder="••••••••" onChange={e=>setEditDraft({...editDraft,password:e.target.value})} /></Field>
           <Field label="Data de nascimento"><input style={inputStyle} type="date" value={editDraft.birthdate} onChange={e=>setEditDraft({...editDraft,birthdate:e.target.value})} /></Field>
-          <button onClick={()=>{ patch(d=>({...d, profile: editDraft})); back(); }} style={primaryBtn}>Salvar alterações</button>
+          <button onClick={()=>{ patch(d=>({...d, people: d.people.map(p => p.id === myPersonId ? { ...p, name: editDraft.name, email: editDraft.email, birthdate: editDraft.birthdate } : p) })); back(); }} style={primaryBtn}>Salvar alterações</button>
         </div>
       </div>
     );
@@ -1222,11 +1284,14 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen }) {
     <div style={{ paddingBottom: 100 }}>
       <div style={{ display:"flex", flexDirection:"column", alignItems:"center", padding:"30px 18px 10px" }}>
         <div style={{ width: 78, height: 78, borderRadius:"50%", background:"#16283D", color:"#FFFFFF", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"Source Serif 4, serif", fontSize: 28, fontWeight:600 }}>
-          {data.profile.name.slice(0,1)}
+          {(myPerson?.name || "?").slice(0,1)}
         </div>
-        <div style={{ fontFamily:"Source Serif 4, serif", fontSize:20, fontWeight:600, color:"var(--accent)", marginTop:10 }}>{data.profile.name}</div>
-        <button onClick={()=>{ setEditDraft(data.profile); setScreen("edit"); }} style={{ marginTop:8, border:"1.5px solid var(--accent)", background:"transparent", color:"var(--accent)", borderRadius:10, padding:"8px 16px", fontFamily:"Inter", fontWeight:700, fontSize:12.5, cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}>
+        <div style={{ fontFamily:"Source Serif 4, serif", fontSize:20, fontWeight:600, color:"var(--accent)", marginTop:10 }}>{myPerson?.name || "Você"}</div>
+        <button onClick={()=>{ setEditDraft(myPerson || {name:"",email:"",birthdate:""}); setScreen("edit"); }} style={{ marginTop:8, border:"1.5px solid var(--accent)", background:"transparent", color:"var(--accent)", borderRadius:10, padding:"8px 16px", fontFamily:"Inter", fontWeight:700, fontSize:12.5, cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}>
           <Icon name="edit" size={14} /> Editar perfil
+        </button>
+        <button onClick={switchPerson} style={{ marginTop:8, border:"none", background:"transparent", color:"var(--muted-2)", fontFamily:"Inter", fontWeight:600, fontSize:12, cursor:"pointer" }}>
+          Não é você? Trocar de pessoa
         </button>
       </div>
 
@@ -1271,12 +1336,19 @@ function saveTheme(isDark) {
   try { localStorage.setItem(THEME_KEY, isDark ? "dark" : "light"); } catch (e) {}
 }
 
+const PERSON_KEY = "financeiro-casal:person-id";
+
+function loadPersonSync() {
+  try { return localStorage.getItem(PERSON_KEY); } catch (e) { return null; }
+}
+
 function FinanceApp() {
   const [data, setData] = useState(null);
   const [tab, setTab] = useState("inicio");
   const [date, setDate] = useState(new Date());
   const [notifOpen, setNotifOpen] = useState(false);
   const [isDark, setIsDark] = useState(loadThemeSync);
+  const [myPersonId, setMyPersonIdState] = useState(loadPersonSync);
   const saveTimer = useRef(null);
 
   useEffect(() => { loadData().then(setData); }, []);
@@ -1298,6 +1370,16 @@ function FinanceApp() {
     setIsDark(prev => { const next = !prev; saveTheme(next); return next; });
   }
 
+  function choosePerson(id) {
+    try { localStorage.setItem(PERSON_KEY, id); } catch (e) {}
+    setMyPersonIdState(id);
+  }
+  function switchPerson() {
+    try { localStorage.removeItem(PERSON_KEY); } catch (e) {}
+    setMyPersonIdState(null);
+    setTab("inicio");
+  }
+
   function patch(fn) {
     setData(prev => {
       const next = fn(prev);
@@ -1313,6 +1395,34 @@ function FinanceApp() {
     );
   }
 
+  const myPerson = data.people.find(p => p.id === myPersonId) || null;
+
+  // Tela "quem é você" — aparece uma vez por dispositivo, ou se o dispositivo escolher trocar.
+  if (!myPersonId || !myPerson) {
+    return (
+      <div className="fin-app" data-theme={isDark ? "dark" : "light"} style={{ fontFamily: "Inter, sans-serif", color: "var(--ink)", width: "100%", maxWidth: 430, margin: "0 auto", background: "var(--bg)", height: "100dvh", paddingTop: "calc(env(safe-area-inset-top) + 24px)", paddingLeft: 24, paddingRight: 24, paddingBottom: 24, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", boxSizing: "border-box", position: "relative", overflow: "hidden", boxShadow: "0 20px 60px -20px rgba(16,24,40,0.4)" }}>
+        <style>{FONT_IMPORT}{THEME_CSS}{`* { box-sizing: border-box; }`}</style>
+        <div style={{ fontFamily: "Source Serif 4, serif", fontSize: 24, fontWeight: 600, color: "var(--accent)", marginBottom: 6, textAlign: "center" }}>Quem é você?</div>
+        <div style={{ fontFamily: "Inter", fontSize: 13.5, color: "var(--muted)", marginBottom: 28, textAlign: "center" }}>
+          Esse aparelho vai lembrar essa escolha. Assim dá pra saber quem lançou o quê.
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%", maxWidth: 320 }}>
+          {data.people.map(p => (
+            <button key={p.id} onClick={() => choosePerson(p.id)} style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 18px", borderRadius: 16, border: "1.5px solid var(--border)", background: "var(--card)", cursor: "pointer" }}>
+              <div style={{ width: 44, height: 44, borderRadius: "50%", background: "#16283D", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Source Serif 4, serif", fontSize: 18, fontWeight: 600, flexShrink: 0 }}>{p.name.slice(0,1)}</div>
+              <div style={{ fontFamily: "Inter", fontSize: 15.5, fontWeight: 700, color: "var(--ink)" }}>{p.name}</div>
+            </button>
+          ))}
+        </div>
+        <div style={{ fontFamily: "Inter", fontSize: 11.5, color: "var(--muted-2)", marginTop: 24, textAlign: "center" }}>
+          Os nomes podem ser alterados depois em Conta → Editar perfil.
+        </div>
+      </div>
+    );
+  }
+
+  const partner = data.people.find(p => p.id !== myPersonId);
+
   const TABS = [
     { key: "inicio", icon: "home", label: "Início" },
     { key: "lancamentos", icon: "list", label: "Lançamentos" },
@@ -1326,11 +1436,11 @@ function FinanceApp() {
       <style>{FONT_IMPORT}{THEME_CSS}{`* { box-sizing: border-box; } select { -webkit-appearance:none; appearance:none; }`}</style>
 
       <div style={{ position: "relative", flex: 1, minHeight: 0, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
-        {tab === "inicio" && <Inicio data={data} patch={patch} goManage={() => setTab("conta_conexoes")} goCards={() => setTab("conta_cartoes")} setNotifOpen={setNotifOpen} onReload={reloadFromCloud} syncing={syncing} lastSync={lastSync} isDark={isDark} toggleTheme={toggleTheme} />}
-        {tab === "lancamentos" && <Lancamentos data={data} patch={patch} date={date} setDate={setDate} />}
+        {tab === "inicio" && <Inicio data={data} patch={patch} goManage={() => setTab("conta_conexoes")} goCards={() => setTab("conta_cartoes")} setNotifOpen={setNotifOpen} onReload={reloadFromCloud} syncing={syncing} lastSync={lastSync} isDark={isDark} toggleTheme={toggleTheme} myPersonId={myPersonId} myPerson={myPerson} partnerName={partner?.name} />}
+        {tab === "lancamentos" && <Lancamentos data={data} patch={patch} date={date} setDate={setDate} myPersonId={myPersonId} />}
         {tab === "relatorios" && <Relatorios data={data} date={date} setDate={setDate} />}
         {tab === "limites" && <Limites data={data} patch={patch} />}
-        {(tab === "conta" || tab === "conta_conexoes" || tab === "conta_cartoes") && <Conta data={data} patch={patch} key={tab} isDark={isDark} toggleTheme={toggleTheme} initialScreen={tab === "conta_conexoes" ? "conexoes" : tab === "conta_cartoes" ? "cartoes" : "main"} />}
+        {(tab === "conta" || tab === "conta_conexoes" || tab === "conta_cartoes") && <Conta data={data} patch={patch} key={tab} isDark={isDark} toggleTheme={toggleTheme} initialScreen={tab === "conta_conexoes" ? "conexoes" : tab === "conta_cartoes" ? "cartoes" : "main"} myPersonId={myPersonId} myPerson={myPerson} switchPerson={switchPerson} />}
 
         <Sheet open={notifOpen} onClose={()=>setNotifOpen(false)} title="Notificações">
           {data.notifications.length === 0 && <div style={{ fontFamily:"Inter", fontSize:13.5, color:"var(--muted)" }}>Sem notificações.</div>}
