@@ -16,7 +16,7 @@
 </head>
 <body>
 <div id="root"></div>
-<script type="text/babel" data-presets="react">
+<script type="text/plain" id="app-source">
 const { useState, useEffect, useRef, useMemo } = React;
 
 /* ============================================================
@@ -1249,7 +1249,17 @@ function FinanceApp() {
 
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(<FinanceApp />);
+root.render(React.createElement(FinanceApp));
+</script>
+<script>
+  const source = document.getElementById("app-source").textContent;
+  const compiled = Babel.transform(source, {
+    presets: [["react", { runtime: "classic" }]],
+    filename: "app.jsx",
+  }).code;
+  const s = document.createElement("script");
+  s.text = compiled;
+  document.body.appendChild(s);
 </script>
 </body>
 </html>
