@@ -6,13 +6,9 @@
 <title>Financeiro — Casal</title>
 <link rel="icon" href="data:,">
 <style>
-  html, body {
-    margin: 0; padding: 0; height: 100%; width: 100%;
-    overflow: hidden; overscroll-behavior: none;
-    background: #0d0f11;
-  }
-  body { display: flex; justify-content: center; align-items: stretch; }
-  #root { width: 100%; display: flex; }
+  html, body { margin:0; padding:0; height:100%; width:100%; overflow:hidden; overscroll-behavior:none; background:#0d0f11; }
+  body { display:flex; justify-content:center; align-items:stretch; }
+  #root { width:100%; display:flex; }
   @keyframes spin { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
 </style>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -114,6 +110,7 @@ function seedData() {
       { id: uid(), date: iso(10), desc: "Netflix", value: -39.9, type: "despesa", category: "Assinaturas e serviço", accountId: null, status: "resolvido", fixed: true, tag: "", personId: "p2", createdAt: Date.now() - 4e6 },
     ],
     tags: ["casa"],
+    recurringTemplates: [],
     limits: [
       { id: uid(), category: "Alimentação", value: 700, repeats: true, period: "Mensal" },
       { id: uid(), category: "Lazer e hobbies", value: 300, repeats: true, period: "Mensal" },
@@ -147,6 +144,7 @@ function migrateData(d) {
     ] };
   }
   if (!next.tags) next = { ...next, tags: [] };
+  if (!next.recurringTemplates) next = { ...next, recurringTemplates: [] };
   if (!next.notifications) next = { ...next, notifications: [] };
   return next;
 }
@@ -287,6 +285,17 @@ function Inicio({ data, patch, goManage, goCards, setNotifOpen, onReload, syncin
   const totalFaturas = data.cards.reduce((s, c) => s + c.invoice, 0);
   const unread = data.notifications.filter(n => !n.read).length;
 
+  // Contas sem "dono" definido (cadastradas antes dessa função existir) aparecem
+  // para todos, como sempre apareceram. Contas novas pertencem a quem cadastrou.
+  const myAccounts = data.accounts.filter(a => !a.ownerId || a.ownerId === myPersonId);
+  const partnerAccounts = data.accounts.filter(a => a.ownerId && a.ownerId !== myPersonId);
+
+  const cardsByOwner = data.people.map(p => ({
+    person: p,
+    cards: data.cards.filter(c => c.ownerId === p.id),
+  })).concat([{ person: null, cards: data.cards.filter(c => !c.ownerId) }])
+    .filter(g => g.cards.length > 0);
+
   const partnerNew = data.transactions
     .filter(t => t.personId && t.personId !== myPersonId && (t.createdAt || 0) > lastSeenPartner)
     .sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
@@ -386,7 +395,7 @@ function Inicio({ data, patch, goManage, goCards, setNotifOpen, onReload, syncin
           <button onClick={goManage} style={{ border: "none", background: "transparent", color: "var(--accent)", fontFamily: "Inter", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Gerenciar contas ›</button>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {data.accounts.map(a => (
+          {myAccounts.map(a => (
             <Card key={a.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: 12 }}>
               <BankBadge bank={a.bank} size={36} />
               <div style={{ flex: 1 }}>
@@ -396,10 +405,28 @@ function Inicio({ data, patch, goManage, goCards, setNotifOpen, onReload, syncin
               <div style={{ fontFamily: "IBM Plex Mono", fontSize: 14, fontWeight: 600, color: "var(--ink-soft)" }}>{brl(a.balance)}</div>
             </Card>
           ))}
-          {data.accounts.length === 0 && (
-            <Card><div style={{ fontFamily: "Inter", fontSize: 13.5, color: "var(--muted)" }}>Nenhuma conta cadastrada. Toque em "Gerenciar contas" pra adicionar.</div></Card>
+          {myAccounts.length === 0 && (
+            <Card><div style={{ fontFamily: "Inter", fontSize: 13.5, color: "var(--muted)" }}>Nenhuma conta sua cadastrada ainda. Toque em "Gerenciar contas" pra adicionar.</div></Card>
           )}
         </div>
+
+        {partnerAccounts.length > 0 && (
+          <>
+            <div style={{ fontFamily: "Inter", fontSize: 11.5, letterSpacing: 1, textTransform: "uppercase", color: "var(--muted-2)", fontWeight: 700, margin: "14px 0 8px" }}>Contas de {partnerName}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {partnerAccounts.map(a => (
+                <Card key={a.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, opacity: 0.85 }}>
+                  <BankBadge bank={a.bank} size={36} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontFamily: "Inter", fontSize: 13.5, fontWeight: 600 }}>{a.name}</div>
+                    <div style={{ fontFamily: "Inter", fontSize: 11.5, color: "var(--muted-2)" }}>{BANKS[a.bank]?.name}</div>
+                  </div>
+                  <div style={{ fontFamily: "IBM Plex Mono", fontSize: 14, fontWeight: 600, color: "var(--ink-soft)" }}>{brl(a.balance)}</div>
+                </Card>
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       {/* faturas */}
@@ -416,19 +443,32 @@ function Inicio({ data, patch, goManage, goCards, setNotifOpen, onReload, syncin
       )}
 
       <Sheet open={faturasOpen} onClose={() => setFaturasOpen(false)} title="Faturas em aberto">
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {data.cards.map(c => (
-            <Card key={c.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: 12 }}>
-              <BankBadge bank={c.bank} size={36} />
-              <div style={{ flex: 1 }}>
-                <div style={{ fontFamily: "Inter", fontSize: 13.5, fontWeight: 700 }}>{c.name}</div>
-                <div style={{ fontFamily: "Inter", fontSize: 11.5, color: "var(--muted-2)" }}>Vence dia {c.dueDay}</div>
+        {cardsByOwner.map(g => {
+          const subtotal = g.cards.reduce((s,c) => s + c.invoice, 0);
+          return (
+            <div key={g.person?.id || "sem-dono"} style={{ marginBottom: 16 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom: 8 }}>
+                <div style={{ fontFamily: "Inter", fontSize: 12, letterSpacing: 1, textTransform: "uppercase", color: "var(--label)", fontWeight: 700 }}>
+                  {g.person ? `Faturas de ${g.person.name}` : "Outras faturas"}
+                </div>
+                <div style={{ fontFamily: "IBM Plex Mono", fontSize: 13, fontWeight: 700, color: "var(--accent)" }}>{brl(subtotal)}</div>
               </div>
-              <div style={{ fontFamily: "IBM Plex Mono", fontSize: 15, fontWeight: 600, color: "var(--accent)" }}>{brl(c.invoice)}</div>
-            </Card>
-          ))}
-        </div>
-        <button onClick={() => { setFaturasOpen(false); goCards(); }} style={{ ...primaryBtn, marginTop: 14 }}>Ver todos os cartões</button>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {g.cards.map(c => (
+                  <Card key={c.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: 12 }}>
+                    <BankBadge bank={c.bank} size={36} />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontFamily: "Inter", fontSize: 13.5, fontWeight: 700 }}>{c.name}</div>
+                      <div style={{ fontFamily: "Inter", fontSize: 11.5, color: "var(--muted-2)" }}>Vence dia {c.dueDay}</div>
+                    </div>
+                    <div style={{ fontFamily: "IBM Plex Mono", fontSize: 15, fontWeight: 600, color: "var(--accent)" }}>{brl(c.invoice)}</div>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+        <button onClick={() => { setFaturasOpen(false); goCards(); }} style={primaryBtn}>Ver todos os cartões</button>
       </Sheet>
     </div>
   );
@@ -442,8 +482,11 @@ const blankNewTx = () => ({
   desc: "", value: "", type: "despesa", category: DESPESA_CATS[0], accountId: "",
   paymentMethod: "conta", cardId: "",
   date: todayISO(), repeatType: "none", // none | installment | fixed
-  totalParcelas: 2, currentParcela: 1, repeatMonths: 12, tag: "",
+  totalParcelas: 2, currentParcela: 1, repeatMonths: 12, fixedMode: "months", tag: "",
 });
+
+const monthKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+const keyToDate = (key, day) => { const [y, m] = key.split("-").map(Number); return new Date(y, m - 1, day); };
 
 const PAYMENT_METHODS = [
   ["conta", "Conta (débito)"], ["cartao", "Cartão de crédito"], ["pix", "Pix"],
@@ -452,6 +495,8 @@ const PAYMENT_METHODS = [
 const paymentLabel = (m) => (PAYMENT_METHODS.find(p => p[0] === m) || [,""])[1];
 
 function Lancamentos({ data, patch, date, setDate, myPersonId }) {
+  const myAccounts = data.accounts.filter(a => !a.ownerId || a.ownerId === myPersonId);
+  const myCards = data.cards.filter(c => !c.ownerId || c.ownerId === myPersonId);
   const [menuOpen, setMenuOpen] = useState(false);
   const [mode, setMode] = useState("normal"); // normal | select | search | filter | period
   const [selected, setSelected] = useState([]);
@@ -462,6 +507,7 @@ function Lancamentos({ data, patch, date, setDate, myPersonId }) {
   const [newTx, setNewTx] = useState(blankNewTx());
   const [editingId, setEditingId] = useState(null);
   const [actionFor, setActionFor] = useState(null); // tx tapped for quick actions
+  const [fixedSheetOpen, setFixedSheetOpen] = useState(false);
 
   function openNew() { setNewTx(blankNewTx()); setEditingId(null); setNewTxOpen(true); }
   function openEdit(tx) {
@@ -488,8 +534,8 @@ function Lancamentos({ data, patch, date, setDate, myPersonId }) {
     const totalVal = parseFloat(newTx.value);
     if (!totalVal) return;
     const viaCard = newTx.type === "despesa" && newTx.paymentMethod === "cartao";
-    const accountId = viaCard ? null : (["conta", "pix"].includes(newTx.paymentMethod) ? (newTx.accountId || data.accounts[0]?.id || null) : null);
-    const cardId = viaCard ? (newTx.cardId || data.cards[0]?.id || null) : null;
+    const accountId = viaCard ? null : (["conta", "pix"].includes(newTx.paymentMethod) ? (newTx.accountId || myAccounts[0]?.id || null) : null);
+    const cardId = viaCard ? (newTx.cardId || myCards[0]?.id || null) : null;
     const common = { type: newTx.type, category: newTx.category, accountId, cardId, tag: newTx.tag || "", paymentMethod: newTx.paymentMethod, personId: myPersonId, createdAt: Date.now() };
 
     if (editingId) {
@@ -526,20 +572,16 @@ function Lancamentos({ data, patch, date, setDate, myPersonId }) {
         return next;
       });
     } else if (newTx.repeatType === "fixed") {
-      const months = Math.max(1, parseInt(newTx.repeatMonths) || 12);
-      const groupId = uid();
       const base = new Date(newTx.date + "T00:00:00");
-      const novas = [];
-      for (let i = 0; i < months; i++) {
-        const d2 = new Date(base.getFullYear(), base.getMonth() + i, base.getDate());
-        novas.push({
-          id: uid(), date: d2.toISOString().slice(0, 10), desc: newTx.desc,
-          value: newTx.type === "despesa" ? -Math.abs(totalVal) : Math.abs(totalVal),
-          status: i === 0 ? "resolvido" : "pendente", fixed: true,
-          recurring: { groupId, index: i, total: months }, ...common,
-        });
-      }
-      patch(d => applyTxEffect({ ...d, transactions: [...novas, ...d.transactions] }, novas[0], 1));
+      const startKey = monthKey(base);
+      const templateId = uid();
+      const template = {
+        id: templateId, desc: newTx.desc, value: Math.abs(totalVal), day: base.getDate(),
+        startMonth: startKey, mode: newTx.fixedMode, totalMonths: newTx.fixedMode === "months" ? Math.max(1, parseInt(newTx.repeatMonths) || 12) : null,
+        active: true, confirmedMonths: [startKey], skippedMonths: [], ...common,
+      };
+      const t = { id: uid(), date: newTx.date, desc: newTx.desc, value: newTx.type === "despesa" ? -Math.abs(totalVal) : Math.abs(totalVal), status: "resolvido", fixed: true, recurringId: templateId, ...common };
+      patch(d => applyTxEffect({ ...d, transactions: [t, ...d.transactions], recurringTemplates: [...(d.recurringTemplates || []), template] }, t, 1));
     } else {
       const t = { id: uid(), date: newTx.date, desc: newTx.desc, value: newTx.type === "despesa" ? -Math.abs(totalVal) : Math.abs(totalVal), status: "resolvido", fixed: false, ...common };
       patch(d => applyTxEffect({ ...d, transactions: [t, ...d.transactions] }, t, 1));
@@ -552,6 +594,36 @@ function Lancamentos({ data, patch, date, setDate, myPersonId }) {
     const d = new Date(t.date);
     return d.getFullYear() === date.getFullYear() && d.getMonth() === date.getMonth();
   }), [data.transactions, date]);
+
+  const viewedKey = monthKey(date);
+  const pendingFixed = useMemo(() => (data.recurringTemplates || []).filter(t => {
+    if (!t.active) return false;
+    if (t.confirmedMonths.includes(viewedKey) || t.skippedMonths.includes(viewedKey)) return false;
+    if (viewedKey < t.startMonth) return false;
+    if (t.mode === "months") {
+      const [sy, sm] = t.startMonth.split("-").map(Number);
+      const [vy, vm] = viewedKey.split("-").map(Number);
+      const idx = (vy - sy) * 12 + (vm - sm);
+      if (idx >= t.totalMonths) return false;
+    }
+    return true;
+  }), [data.recurringTemplates, viewedKey]);
+
+  function confirmFixed(tpl) {
+    const d2 = keyToDate(viewedKey, tpl.day);
+    const t = { id: uid(), date: d2.toISOString().slice(0, 10), desc: tpl.desc, value: tpl.type === "despesa" ? -Math.abs(tpl.value) : Math.abs(tpl.value), status: "resolvido", fixed: true, recurringId: tpl.id, type: tpl.type, category: tpl.category, accountId: tpl.accountId, cardId: tpl.cardId, tag: tpl.tag, paymentMethod: tpl.paymentMethod, personId: tpl.personId, createdAt: Date.now() };
+    patch(d => applyTxEffect({
+      ...d,
+      transactions: [t, ...d.transactions],
+      recurringTemplates: (d.recurringTemplates||[]).map(x => x.id === tpl.id ? { ...x, confirmedMonths: [...x.confirmedMonths, viewedKey] } : x),
+    }, t, 1));
+  }
+  function skipFixed(tpl) {
+    patch(d => ({ ...d, recurringTemplates: (d.recurringTemplates||[]).map(x => x.id === tpl.id ? { ...x, skippedMonths: [...x.skippedMonths, viewedKey] } : x) }));
+  }
+  function cancelFixed(tpl) {
+    patch(d => ({ ...d, recurringTemplates: (d.recurringTemplates||[]).map(x => x.id === tpl.id ? { ...x, active: false } : x) }));
+  }
 
   const filtered = useMemo(() => monthTx.filter(t => {
     if (query && !t.desc.toLowerCase().includes(query.toLowerCase())) return false;
@@ -606,6 +678,40 @@ function Lancamentos({ data, patch, date, setDate, myPersonId }) {
       </div>
 
       <MonthBar date={date} setDate={setDate} />
+
+      {pendingFixed.length > 0 && (
+        <div style={{ padding: "0 18px 10px" }}>
+          <Card onClick={() => setFixedSheetOpen(true)} style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, cursor: "pointer", background: "var(--soft)" }}>
+            <Icon name="cal" size={20} color="var(--accent)" />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: "Inter", fontSize: 13.5, fontWeight: 700, color: "var(--ink)" }}>{pendingFixed.length} gasto(s) fixo(s) esse mês</div>
+              <div style={{ fontFamily: "Inter", fontSize: 11.5, color: "var(--muted-2)" }}>Toque pra confirmar ou pular</div>
+            </div>
+            <Icon name="chevronR" size={18} color="var(--accent)" />
+          </Card>
+        </div>
+      )}
+
+      <Sheet open={fixedSheetOpen} onClose={() => setFixedSheetOpen(false)} title="Gastos fixos do mês">
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {pendingFixed.map(tpl => (
+            <Card key={tpl.id} style={{ padding: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+                <div>
+                  <div style={{ fontFamily: "Inter", fontSize: 13.5, fontWeight: 700 }}>{tpl.desc}</div>
+                  <div style={{ fontFamily: "Inter", fontSize: 11.5, color: "var(--muted-2)" }}>{tpl.category} · dia {tpl.day}</div>
+                </div>
+                <div style={{ fontFamily: "IBM Plex Mono", fontSize: 14, fontWeight: 600, color: tpl.type === "receita" ? "#1E7F63" : "#A13D46" }}>{brl(tpl.type === "receita" ? tpl.value : -tpl.value)}</div>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => confirmFixed(tpl)} style={{ flex: 1, padding: "9px", borderRadius: 10, border: "none", background: "#16283D", color: "#fff", fontFamily: "Inter", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>Lançar esse mês</button>
+                <button onClick={() => skipFixed(tpl)} style={{ flex: 1, padding: "9px", borderRadius: 10, border: "1.5px solid var(--border)", background: "transparent", color: "var(--muted)", fontFamily: "Inter", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>Pular esse mês</button>
+              </div>
+              <button onClick={() => cancelFixed(tpl)} style={{ width: "100%", marginTop: 8, padding: "6px", border: "none", background: "transparent", color: "#A13D46", fontFamily: "Inter", fontWeight: 600, fontSize: 11.5, cursor: "pointer" }}>Cancelar essa recorrência</button>
+            </Card>
+          ))}
+        </div>
+      </Sheet>
 
       {mode === "search" && (
         <div style={{ padding: "0 18px 10px" }}>
@@ -742,7 +848,7 @@ function Lancamentos({ data, patch, date, setDate, myPersonId }) {
           <Field label="Cartão">
             <select style={inputStyle} value={newTx.cardId} onChange={e => setNewTx({ ...newTx, cardId: e.target.value })}>
               <option value="">Selecione</option>
-              {data.cards.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {myCards.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </Field>
         )}
@@ -750,7 +856,7 @@ function Lancamentos({ data, patch, date, setDate, myPersonId }) {
           <Field label="Conta">
             <select style={inputStyle} value={newTx.accountId} onChange={e => setNewTx({ ...newTx, accountId: e.target.value })}>
               <option value="">Selecione</option>
-              {data.accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              {myAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
           </Field>
         )}
@@ -791,9 +897,19 @@ function Lancamentos({ data, patch, date, setDate, myPersonId }) {
 
         {!editingId && newTx.repeatType === "fixed" && (
           <div style={{ background: "var(--soft)", borderRadius: 14, padding: 14, marginBottom: 14 }}>
-            <Field label="Por quantos meses se repete?"><input style={inputStyle} type="number" min="1" value={newTx.repeatMonths} onChange={e => setNewTx({ ...newTx, repeatMonths: e.target.value })} /></Field>
+            <Field label="Duração">
+              <div style={{ display: "flex", gap: 8 }}>
+                <Pill active={newTx.fixedMode === "months"} onClick={() => setNewTx({ ...newTx, fixedMode: "months" })}>Por tempo determinado</Pill>
+                <Pill active={newTx.fixedMode === "always"} onClick={() => setNewTx({ ...newTx, fixedMode: "always" })}>Sempre</Pill>
+              </div>
+            </Field>
+            {newTx.fixedMode === "months" && (
+              <Field label="Por quantos meses se repete?"><input style={inputStyle} type="number" min="1" value={newTx.repeatMonths} onChange={e => setNewTx({ ...newTx, repeatMonths: e.target.value })} /></Field>
+            )}
             <div style={{ fontFamily: "Inter", fontSize: 12.5, color: "var(--muted)" }}>
-              Vamos gerar esse lançamento de {brl(parseFloat(newTx.value)||0)} todo mês, a partir de {newTx.date?.split("-").reverse().join("/")}, por {newTx.repeatMonths || 0} meses seguidos.
+              Vamos lançar esse valor agora, em {newTx.date?.split("-").reverse().join("/")}. {newTx.fixedMode === "always"
+                ? "Todo mês seguinte, mostramos um lembrete pra você confirmar se quer lançar de novo — sem gerar sozinho."
+                : `Todo mês, pelos próximos ${newTx.repeatMonths || 0} meses, mostramos um lembrete pra você confirmar.`}
             </div>
           </div>
         )}
@@ -1083,7 +1199,7 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, my
     if (accDraft.id) {
       patch(d => ({ ...d, accounts: d.accounts.map(a => a.id === accDraft.id ? { ...a, name: accDraft.name, bank: accDraft.bank, balance } : a) }));
     } else {
-      patch(d => ({ ...d, accounts: [...d.accounts, { id: uid(), name: accDraft.name, bank: accDraft.bank, balance }] }));
+      patch(d => ({ ...d, accounts: [...d.accounts, { id: uid(), name: accDraft.name, bank: accDraft.bank, balance, ownerId: myPersonId }] }));
     }
     setAccEditing(false);
     setAccDraft(null);
@@ -1216,7 +1332,7 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, my
           <Field label="Limite do cartão"><input style={inputStyle} type="number" value={cardDraft.limit} onChange={e=>setCardDraft({...cardDraft,limit:e.target.value})} /></Field>
           <button onClick={()=>{
             if(!cardDraft.name||!cardDraft.limit) return;
-            patch(d=>({...d, cards:[...d.cards,{ id:uid(), name:cardDraft.name, bank:cardDraft.bank, limit:parseFloat(cardDraft.limit), closingDay:5, dueDay:12, invoice:0 }]}));
+            patch(d=>({...d, cards:[...d.cards,{ id:uid(), name:cardDraft.name, bank:cardDraft.bank, limit:parseFloat(cardDraft.limit), closingDay:5, dueDay:12, invoice:0, ownerId: myPersonId }]}));
             setAddingCard(false); setCardDraft({name:"",bank:"nubank",limit:""});
           }} style={primaryBtn}>Salvar cartão</button>
         </Sheet>
@@ -1475,10 +1591,7 @@ root.render(React.createElement(FinanceApp));
 </script>
 <script>
   const source = document.getElementById("app-source").textContent;
-  const compiled = Babel.transform(source, {
-    presets: [["react", { runtime: "classic" }]],
-    filename: "app.jsx",
-  }).code;
+  const compiled = Babel.transform(source, { presets: [["react", { runtime: "classic" }]], filename: "app.jsx" }).code;
   const s = document.createElement("script");
   s.text = compiled;
   document.body.appendChild(s);
