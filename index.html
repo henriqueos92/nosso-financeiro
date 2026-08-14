@@ -557,10 +557,13 @@ const blankNewTx = () => ({
 const monthKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 const keyToDate = (key, day) => { const [y, m] = key.split("-").map(Number); return new Date(y, m - 1, day); };
 
-// Uma compra no cartão entra na fatura que fecha logo em seguida a ela: se o
-// cartão fecha dia 3 e a compra foi feita dia 14, ela cai na fatura do mês
-// seguinte (mesmo tendo sido feita no mês anterior) — igual o app do banco
-// mostra. Lançamentos sem cartão continuam agrupados pelo mês da própria data.
+// A data de fechamento real do cartão varia um pouco de ciclo pra ciclo (o
+// banco ajusta por fim de semana/feriado), então não dá pra deduzir com
+// 100% de certeza em qual fatura uma compra caiu só com dia-do-mês +
+// closingDay. Por isso, lançamentos importados de CSV carregam o mês da
+// fatura explicitamente (invoiceMonth, escolhido por você na importação) —
+// isso tem prioridade. Sem essa informação (lançamento manual antigo),
+// caímos de volta pra estimativa por closingDay.
 function invoiceMonthOf(dateISO, closingDay) {
   const d = parseLocalDate(dateISO);
   let year = d.getFullYear(), month = d.getMonth();
@@ -570,7 +573,17 @@ function invoiceMonthOf(dateISO, closingDay) {
   }
   return { year, month };
 }
+function shiftMonthKey(key, offset) {
+  const [y, m] = key.split("-").map(Number);
+  const total = (y * 12 + (m - 1)) + offset;
+  const ny = Math.floor(total / 12), nm = ((total % 12) + 12) % 12;
+  return `${ny}-${String(nm + 1).padStart(2, "0")}`;
+}
 function txDisplayMonth(t, cards) {
+  if (t.invoiceMonth) {
+    const [y, m] = t.invoiceMonth.split("-").map(Number);
+    return { year: y, month: m - 1 };
+  }
   if (t.cardId) {
     const card = cards.find(c => c.id === t.cardId);
     if (card) return invoiceMonthOf(t.date, card.closingDay);
@@ -602,6 +615,7 @@ function Lancamentos({ data, patch, date, setDate, myPersonId }) {
   const [importOpen, setImportOpen] = useState(false);
   const [importRows, setImportRows] = useState([]);
   const [importCardId, setImportCardId] = useState("");
+  const [importInvoiceMonth, setImportInvoiceMonth] = useState(() => monthKey(date));
 
   function parseCsvLine(line) {
     const out = []; let cur = ""; let q = false;
@@ -645,7 +659,7 @@ function Lancamentos({ data, patch, date, setDate, myPersonId }) {
   function toggleImportRow(i) { setImportRows(rows => rows.map((r,idx) => idx===i ? { ...r, checked: !r.checked } : r)); }
 
   function doImport() {
-    if (!importCardId) return;
+    if (!importCardId || !importInvoiceMonth) return;
     const toImport = importRows.filter(r => r.checked && !r.already);
     const news = [];
     toImport.forEach(r => {
@@ -656,10 +670,10 @@ function Lancamentos({ data, patch, date, setDate, myPersonId }) {
         for (let i = 1; i <= r.total; i++) {
           const offset = i - r.current;
           const d2 = new Date(base.getFullYear(), base.getMonth() + offset, base.getDate());
-          news.push({ id: uid(), date: toISO(d2), desc: r.desc, value: -r.amount, status: i <= r.current ? "resolvido" : "pendente", fixed: false, installment: { groupId, current: i, total: r.total, liveAt: r.current }, ...common });
+          news.push({ id: uid(), date: toISO(d2), desc: r.desc, value: -r.amount, status: i <= r.current ? "resolvido" : "pendente", fixed: false, installment: { groupId, current: i, total: r.total, liveAt: r.current }, invoiceMonth: shiftMonthKey(importInvoiceMonth, offset), ...common });
         }
       } else {
-        news.push({ id: uid(), date: r.date, desc: r.desc, value: -r.amount, status: "resolvido", fixed: false, ...common });
+        news.push({ id: uid(), date: r.date, desc: r.desc, value: -r.amount, status: "resolvido", fixed: false, invoiceMonth: importInvoiceMonth, ...common });
       }
     });
     patch(d => {
@@ -1117,6 +1131,12 @@ function Lancamentos({ data, patch, date, setDate, myPersonId }) {
                 {myCards.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </Field>
+            <Field label="Essa fatura aparece em qual mês no app?">
+              <input style={{ ...inputStyle, maxWidth: "100%" }} type="month" value={importInvoiceMonth} onChange={e=>setImportInvoiceMonth(e.target.value)} />
+            </Field>
+            <div style={{ fontFamily:"Inter", fontSize:11.5, color:"var(--muted-2)", marginTop:-8, marginBottom:14 }}>
+              Veja no app do banco o mês em que essa fatura fecha/vence — a data de cada compra continua sendo a real, só a aba em Lançamentos usa esse mês.
+            </div>
             <div style={{ fontFamily:"Inter", fontSize:12, color:"var(--muted)", margin:"6px 0 12px" }}>{importRows.length} lançamento(s) encontrado(s). Desmarque o que não quiser importar.</div>
             <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:14 }}>
               {importRows.map((r,i) => (
