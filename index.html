@@ -57,6 +57,13 @@ const BANKS = {
   inter: { name: "Banco Inter", color: "#FF7A00", letter: "B" },
   bb: { name: "Banco do Brasil", color: "#F9D616", letter: "B" },
 };
+let CUSTOM_BANKS = {};
+function syncCustomBanks(list) {
+  CUSTOM_BANKS = {};
+  (list || []).forEach(b => { CUSTOM_BANKS[b.key] = { name: b.name, color: b.color, letter: (b.name[0] || "?").toUpperCase() }; });
+}
+function allBanks() { return { ...BANKS, ...CUSTOM_BANKS }; }
+const BANK_COLORS = ["#820AD1","#EC7000","#1B5FAB","#FF7A00","#16283D","#1E7F63","#A13D46","#A9834B","#5B6B7C"];
 
 const DESPESA_CATS = ["Alimentação","Assinaturas e serviço","Bares e restaurante","Casa","Compras","Cuidados pessoais","Dívidas e empréstimo","Educação","Família e filhos","Impostos e taxas","Investimentos","Lazer e hobbies","Mercado","Outros","Pet","Presentes e doação","Roupas","Saúde","Trabalho","Transporte","Viagem"];
 const RECEITA_CATS = ["Empréstimos","Investimentos","Outras receitas","Salário"];
@@ -84,6 +91,7 @@ function applyTxEffect(d, tx, sign) {
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const toISO = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 const parseLocalDate = (s) => { const [y,m,d] = s.split("-").map(Number); return new Date(y, m-1, d); };
+const greeting = () => { const h = new Date().getHours(); if (h < 12) return "Bom dia,"; if (h < 18) return "Boa tarde,"; return "Boa noite,"; };
 const monthLabel = (d) => d.toLocaleDateString("pt-BR", { month: "long", year: "numeric" }).replace(/^\w/, (c) => c.toUpperCase());
 
 function seedData() {
@@ -113,6 +121,7 @@ function seedData() {
     ],
     tags: ["casa"],
     recurringTemplates: [],
+    customBanks: [],
     limits: [
       { id: uid(), category: "Alimentação", value: 700, repeats: true, period: "Mensal" },
       { id: uid(), category: "Lazer e hobbies", value: 300, repeats: true, period: "Mensal" },
@@ -147,6 +156,7 @@ function migrateData(d) {
   }
   if (!next.tags) next = { ...next, tags: [] };
   if (!next.recurringTemplates) next = { ...next, recurringTemplates: [] };
+  if (!next.customBanks) next = { ...next, customBanks: [] };
   if (!next.notifications) next = { ...next, notifications: [] };
   return next;
 }
@@ -212,7 +222,7 @@ const Icon = ({ name, size = 22, color = "currentColor", style }) => {
 
 /* ============================================================ SMALL UI ATOMS */
 const BankBadge = ({ bank, size = 40 }) => {
-  const b = BANKS[bank] || { name: bank, color: "var(--ink-soft)", letter: "?" };
+  const b = allBanks()[bank] || { name: bank, color: "var(--ink-soft)", letter: "?" };
   return (
     <div style={{ width: size, height: size, borderRadius: size * 0.32, background: b.color, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Source Serif 4, serif", fontWeight: 600, fontSize: size * 0.42, flexShrink: 0 }}>
       {b.letter}
@@ -325,7 +335,7 @@ function Inicio({ data, patch, goManage, goCards, setNotifOpen, onReload, syncin
           {(myPerson?.name || "?").slice(0,1)}
         </div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontFamily: "Inter", fontSize: 12, color: "var(--label)", fontWeight: 600 }}>Bom dia,</div>
+          <div style={{ fontFamily: "Inter", fontSize: 12, color: "var(--label)", fontWeight: 600 }}>{greeting()}</div>
           <div style={{ fontFamily: "Source Serif 4, serif", fontSize: 19, fontWeight: 600, color: "var(--accent)" }}>{myPerson?.name || "Você"}</div>
         </div>
         <button onClick={toggleTheme} title={isDark ? "Modo claro" : "Modo escuro"} style={{ ...navBtn, width: 40, height: 40, background: "var(--soft)" }}>
@@ -391,6 +401,20 @@ function Inicio({ data, patch, goManage, goCards, setNotifOpen, onReload, syncin
         </Card>
       </div>
 
+      {/* saldo por pessoa */}
+      <div style={{ padding: "10px 18px 0", display: "flex", gap: 8 }}>
+        {data.people.map(p => {
+          const accts = data.accounts.filter(a => a.ownerId === p.id || (!a.ownerId && p.id === myPersonId));
+          const subtotal = accts.reduce((s,a)=>s+a.balance, 0);
+          return (
+            <Card key={p.id} style={{ flex: 1, padding: 12 }}>
+              <div style={{ fontFamily: "Inter", fontSize: 11, color: "var(--muted-2)", fontWeight: 700, marginBottom: 4 }}>{p.id === myPersonId ? "Você" : p.name}</div>
+              <div style={{ fontFamily: "IBM Plex Mono", fontSize: 15, fontWeight: 600, color: "var(--ink)" }}>{brl(subtotal)}</div>
+            </Card>
+          );
+        })}
+      </div>
+
       {/* contas */}
       <div style={{ padding: "16px 18px 0" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
@@ -403,7 +427,7 @@ function Inicio({ data, patch, goManage, goCards, setNotifOpen, onReload, syncin
               <BankBadge bank={a.bank} size={36} />
               <div style={{ flex: 1 }}>
                 <div style={{ fontFamily: "Inter", fontSize: 13.5, fontWeight: 600 }}>{a.name}</div>
-                <div style={{ fontFamily: "Inter", fontSize: 11.5, color: "var(--muted-2)" }}>{BANKS[a.bank]?.name}</div>
+                <div style={{ fontFamily: "Inter", fontSize: 11.5, color: "var(--muted-2)" }}>{allBanks()[a.bank]?.name}</div>
               </div>
               <div style={{ fontFamily: "IBM Plex Mono", fontSize: 14, fontWeight: 600, color: "var(--ink-soft)" }}>{brl(a.balance)}</div>
             </Card>
@@ -422,7 +446,7 @@ function Inicio({ data, patch, goManage, goCards, setNotifOpen, onReload, syncin
                   <BankBadge bank={a.bank} size={36} />
                   <div style={{ flex: 1 }}>
                     <div style={{ fontFamily: "Inter", fontSize: 13.5, fontWeight: 600 }}>{a.name}</div>
-                    <div style={{ fontFamily: "Inter", fontSize: 11.5, color: "var(--muted-2)" }}>{BANKS[a.bank]?.name}</div>
+                    <div style={{ fontFamily: "Inter", fontSize: 11.5, color: "var(--muted-2)" }}>{allBanks()[a.bank]?.name}</div>
                   </div>
                   <div style={{ fontFamily: "IBM Plex Mono", fontSize: 14, fontWeight: 600, color: "var(--ink-soft)" }}>{brl(a.balance)}</div>
                 </Card>
@@ -435,13 +459,21 @@ function Inicio({ data, patch, goManage, goCards, setNotifOpen, onReload, syncin
       {/* faturas */}
       {data.cards.length > 0 && (
         <div style={{ padding: "16px 18px 0" }}>
-          <Card onClick={() => setFaturasOpen(true)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--soft)", cursor: "pointer" }}>
-            <div>
-              <div style={{ fontFamily: "Inter", fontSize: 12, color: "var(--muted-2)", fontWeight: 700 }}>Faturas em aberto ({data.cards.length})</div>
-              <div style={{ fontFamily: "Source Serif 4, serif", fontSize: 21, fontWeight: 600, color: "var(--accent)" }}>{brl(totalFaturas)}</div>
-            </div>
-            <Icon name="card" color="var(--accent)" size={26} />
-          </Card>
+          <div style={{ fontFamily: "Inter", fontSize: 12, letterSpacing: 1, textTransform: "uppercase", color: "var(--label)", fontWeight: 700, marginBottom: 8 }}>Faturas em aberto</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {cardsByOwner.map(g => {
+              const subtotal = g.cards.reduce((s,c)=>s+c.invoice, 0);
+              return (
+                <Card key={g.person?.id || "sem-dono"} onClick={() => setFaturasOpen(true)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--soft)", cursor: "pointer" }}>
+                  <div>
+                    <div style={{ fontFamily: "Inter", fontSize: 12, color: "var(--muted-2)", fontWeight: 700 }}>{g.person ? `Faturas de ${g.person.id === myPersonId ? "Você" : g.person.name}` : "Outras faturas"} ({g.cards.length})</div>
+                    <div style={{ fontFamily: "Source Serif 4, serif", fontSize: 21, fontWeight: 600, color: "var(--accent)" }}>{brl(subtotal)}</div>
+                  </div>
+                  <Icon name="card" color="var(--accent)" size={26} />
+                </Card>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -542,8 +574,11 @@ function Lancamentos({ data, patch, date, setDate, myPersonId }) {
         const current = m ? parseInt(m[2]) : null;
         const total = m ? parseInt(m[3]) : null;
         const importKey = `${date}|${title}|${amount}`;
-        const already = data.transactions.some(t => t.importKey === importKey);
-        return { date, title, desc, amount, current, total, importKey, already, checked: !already };
+        const groupKey = m ? `INST|${desc}|${total}|${amount}` : null;
+        const already = groupKey
+          ? data.transactions.some(t => t.importGroupKey === groupKey)
+          : data.transactions.some(t => t.importKey === importKey);
+        return { date, title, desc, amount, current, total, importKey, groupKey, already, checked: !already };
       }).filter(Boolean);
       setImportRows(rows);
     };
@@ -557,7 +592,7 @@ function Lancamentos({ data, patch, date, setDate, myPersonId }) {
     const toImport = importRows.filter(r => r.checked && !r.already);
     const news = [];
     toImport.forEach(r => {
-      const common = { type: "despesa", category: "Outros", accountId: null, cardId: importCardId, tag: "", paymentMethod: "cartao", personId: myPersonId, createdAt: Date.now(), importKey: r.importKey };
+      const common = { type: "despesa", category: "Outros", accountId: null, cardId: importCardId, tag: "", paymentMethod: "cartao", personId: myPersonId, createdAt: Date.now(), importKey: r.importKey, importGroupKey: r.groupKey };
       if (r.total) {
         const groupId = uid();
         const base = parseLocalDate(r.date);
@@ -1289,6 +1324,32 @@ function Limites({ data, patch }) {
 }
 
 /* ============================================================ SCREEN: CONTA */
+function NewBankSheet({ open, onClose, onCreated, patch }) {
+  const [name, setName] = useState("");
+  const [color, setColor] = useState(BANK_COLORS[0]);
+  function save() {
+    if (!name.trim()) return;
+    const key = "custom_" + name.trim().toLowerCase().replace(/\s+/g, "_") + "_" + uid();
+    patch(d => ({ ...d, customBanks: [...(d.customBanks || []), { key, name: name.trim(), color }] }));
+    onCreated(key);
+    setName(""); setColor(BANK_COLORS[0]);
+    onClose();
+  }
+  return (
+    <Sheet open={open} onClose={onClose} title="Novo banco">
+      <Field label="Nome do banco"><input style={inputStyle} placeholder="Ex: Mercado Pago" value={name} onChange={e=>setName(e.target.value)} /></Field>
+      <Field label="Cor">
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+          {BANK_COLORS.map(c => (
+            <button key={c} onClick={()=>setColor(c)} style={{ width:32, height:32, borderRadius:"50%", background:c, border: color===c ? "3px solid var(--ink)" : "2px solid transparent", cursor:"pointer" }} />
+          ))}
+        </div>
+      </Field>
+      <button onClick={save} style={primaryBtn}>Salvar banco</button>
+    </Sheet>
+  );
+}
+
 function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, myPerson, switchPerson }) {
   const [screen, setScreen] = useState(initialScreen || "main"); // main | edit | conexoes | cartoes | categorias | tags
   const [editDraft, setEditDraft] = useState(myPerson || { name: "", email: "", birthdate: "" });
@@ -1298,10 +1359,11 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, my
   const [catType, setCatType] = useState("despesa");
   const [newTag, setNewTag] = useState("");
   const [accDraft, setAccDraft] = useState(null);
+  const [newBankOpen, setNewBankOpen] = useState(false);
   const [accEditing, setAccEditing] = useState(false);
 
   function saveAccount() {
-    if (!accDraft.name || accDraft.balance === "") return;
+    if (!accDraft.name) return;
     const balance = parseFloat(accDraft.balance) || 0;
     if (accDraft.id) {
       patch(d => ({ ...d, accounts: d.accounts.map(a => a.id === accDraft.id ? { ...a, name: accDraft.name, bank: accDraft.bank, balance } : a) }));
@@ -1370,7 +1432,7 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, my
                 <BankBadge bank={a.bank} size={40} />
                 <div style={{ flex:1 }}>
                   <div style={{ fontFamily:"Inter", fontSize:13.5, fontWeight:700 }}>{a.name}</div>
-                  <div style={{ fontFamily:"Inter", fontSize:11.5, color:"var(--muted-2)" }}>{BANKS[a.bank]?.name}</div>
+                  <div style={{ fontFamily:"Inter", fontSize:11.5, color:"var(--muted-2)" }}>{allBanks()[a.bank]?.name}</div>
                 </div>
                 <div style={{ fontFamily:"IBM Plex Mono", fontSize:14, fontWeight:600 }}>{brl(a.balance)}</div>
               </Card>
@@ -1388,8 +1450,9 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, my
             <div>
               <Field label="Banco">
                 <select style={inputStyle} value={accDraft.bank} onChange={e=>setAccDraft({...accDraft, bank:e.target.value})}>
-                  {Object.entries(BANKS).map(([k,b])=><option key={k} value={k}>{b.name}</option>)}
+                  {Object.entries(allBanks()).map(([k,b])=><option key={k} value={k}>{b.name}</option>)}
                 </select>
+                <button onClick={()=>setNewBankOpen(true)} style={{ marginTop:6, border:"none", background:"transparent", color:"var(--accent)", fontFamily:"Inter", fontSize:12, fontWeight:700, cursor:"pointer", padding:0 }}>+ Novo banco</button>
               </Field>
               <Field label="Nome da conta"><input style={inputStyle} placeholder="Ex: NuConta" value={accDraft.name} onChange={e=>setAccDraft({...accDraft, name:e.target.value})} /></Field>
               <Field label="Saldo atual"><input style={inputStyle} type="number" placeholder="0,00" value={accDraft.balance} onChange={e=>setAccDraft({...accDraft, balance:e.target.value})} /></Field>
@@ -1400,6 +1463,7 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, my
             </div>
           )}
         </Sheet>
+        <NewBankSheet open={newBankOpen} onClose={()=>setNewBankOpen(false)} patch={patch} onCreated={(key)=>setAccDraft(d=>({...d, bank:key}))} />
       </div>
     );
   }
@@ -1444,8 +1508,9 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, my
           <Field label="Apelido do cartão"><input style={inputStyle} value={cardDraft.name} onChange={e=>setCardDraft({...cardDraft,name:e.target.value})} /></Field>
           <Field label="Banco">
             <select style={inputStyle} value={cardDraft.bank} onChange={e=>setCardDraft({...cardDraft,bank:e.target.value})}>
-              {Object.entries(BANKS).map(([k,b])=><option key={k} value={k}>{b.name}</option>)}
+              {Object.entries(allBanks()).map(([k,b])=><option key={k} value={k}>{b.name}</option>)}
             </select>
+            <button onClick={()=>setNewBankOpen(true)} style={{ marginTop:6, border:"none", background:"transparent", color:"var(--accent)", fontFamily:"Inter", fontSize:12, fontWeight:700, cursor:"pointer", padding:0 }}>+ Novo banco</button>
           </Field>
           <Field label="Limite do cartão"><input style={inputStyle} type="number" value={cardDraft.limit} onChange={e=>setCardDraft({...cardDraft,limit:e.target.value})} /></Field>
           <button onClick={()=>{
@@ -1454,6 +1519,7 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, my
             setAddingCard(false); setCardDraft({name:"",bank:"nubank",limit:""});
           }} style={primaryBtn}>Salvar cartão</button>
         </Sheet>
+        <NewBankSheet open={newBankOpen} onClose={()=>setNewBankOpen(false)} patch={patch} onCreated={(key)=>setCardDraft(d=>({...d, bank:key}))} />
       </div>
     );
   }
@@ -1630,6 +1696,7 @@ function FinanceApp() {
   }
 
   const myPerson = data.people.find(p => p.id === myPersonId) || null;
+  syncCustomBanks(data.customBanks);
 
   // Tela "quem é você" — aparece uma vez por dispositivo, ou se o dispositivo escolher trocar.
   if (!myPersonId || !myPerson) {
