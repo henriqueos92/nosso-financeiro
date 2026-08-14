@@ -89,11 +89,14 @@ function applyTxEffect(d, tx, sign) {
   }
   return d;
 }
+// Compras entram com value negativo (convenção de despesa) e somam na fatura;
+// estornos importados do banco entram com value positivo e abatem da fatura —
+// por isso a soma usa o sinal de value em vez de Math.abs.
 function cardInvoice(transactions, cardId) {
   return transactions.reduce((s, t) => {
     if (t.cardId !== cardId) return s;
     if (t.installment && t.installment.current !== t.installment.liveAt) return s;
-    return s + Math.abs(t.value);
+    return s - t.value;
   }, 0);
 }
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -548,6 +551,28 @@ const blankNewTx = () => ({
 const monthKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 const keyToDate = (key, day) => { const [y, m] = key.split("-").map(Number); return new Date(y, m - 1, day); };
 
+// Uma compra no cartão entra na fatura que fecha logo em seguida a ela: se o
+// cartão fecha dia 3 e a compra foi feita dia 14, ela cai na fatura do mês
+// seguinte (mesmo tendo sido feita no mês anterior) — igual o app do banco
+// mostra. Lançamentos sem cartão continuam agrupados pelo mês da própria data.
+function invoiceMonthOf(dateISO, closingDay) {
+  const d = parseLocalDate(dateISO);
+  let year = d.getFullYear(), month = d.getMonth();
+  if (d.getDate() > closingDay) {
+    month += 1;
+    if (month > 11) { month = 0; year += 1; }
+  }
+  return { year, month };
+}
+function txDisplayMonth(t, cards) {
+  if (t.cardId) {
+    const card = cards.find(c => c.id === t.cardId);
+    if (card) return invoiceMonthOf(t.date, card.closingDay);
+  }
+  const d = parseLocalDate(t.date);
+  return { year: d.getFullYear(), month: d.getMonth() };
+}
+
 const PAYMENT_METHODS = [
   ["conta", "Conta (débito)"], ["cartao", "Cartão de crédito"], ["pix", "Pix"],
   ["vale_alimentacao", "Vale Alimentação"], ["vale_refeicao", "Vale Refeição"],
@@ -593,7 +618,8 @@ function Lancamentos({ data, patch, date, setDate, myPersonId }) {
       const rows = lines.slice(1).map(line => {
         const [date, title, amountRaw] = parseCsvLine(line);
         if (!date || !title) return null;
-        const amount = parseFloat((amountRaw || "0").replace(/\./g, "").replace(",", "."));
+        if (/^pagamento recebido/i.test(title.trim())) return null; // pagamento da fatura, não é um lançamento
+        const amount = parseFloat(String(amountRaw || "0").replace(/\s/g, "").replace(/\./g, "").replace(",", "."));
         const m = title.match(/^(.*?)\s*-\s*Parcela\s*(\d+)\s*\/\s*(\d+)\s*$/i);
         const desc = m ? m[1].trim() : title.trim();
         const current = m ? parseInt(m[2]) : null;
@@ -722,9 +748,9 @@ function Lancamentos({ data, patch, date, setDate, myPersonId }) {
   }
 
   const monthTx = useMemo(() => data.transactions.filter(t => {
-    const d = parseLocalDate(t.date);
-    return d.getFullYear() === date.getFullYear() && d.getMonth() === date.getMonth();
-  }), [data.transactions, date]);
+    const m = txDisplayMonth(t, data.cards);
+    return m.year === date.getFullYear() && m.month === date.getMonth();
+  }), [data.transactions, data.cards, date]);
 
   const viewedKey = monthKey(date);
   const pendingFixed = useMemo(() => (data.recurringTemplates || []).filter(t => {
@@ -1096,7 +1122,7 @@ function Lancamentos({ data, patch, date, setDate, myPersonId }) {
                     <div style={{ fontFamily:"Inter", fontSize:13, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.desc}{r.total ? ` (${r.current}/${r.total})` : ""}</div>
                     <div style={{ fontFamily:"Inter", fontSize:11, color:"var(--muted-2)" }}>{r.date.split("-").reverse().join("/")}{r.already ? " · já importado" : ""}</div>
                   </div>
-                  <div style={{ fontFamily:"IBM Plex Mono", fontSize:13, fontWeight:600, color:"#A13D46" }}>{brl(-r.amount)}</div>
+                  <div style={{ fontFamily:"IBM Plex Mono", fontSize:13, fontWeight:600, color: r.amount < 0 ? "#1E7F63" : "#A13D46" }}>{brl(-r.amount)}</div>
                 </Card>
               ))}
             </div>
@@ -1133,14 +1159,14 @@ function Relatorios({ data, date, setDate }) {
   const [statusFilter, setStatusFilter] = useState("todos");
 
   const monthTx = useMemo(() => data.transactions.filter(t => {
-    const d = parseLocalDate(t.date);
-    return d.getFullYear() === date.getFullYear() && d.getMonth() === date.getMonth() &&
+    const m = txDisplayMonth(t, data.cards);
+    return m.year === date.getFullYear() && m.month === date.getMonth() &&
       (statusFilter === "todos" || t.status === statusFilter);
-  }), [data.transactions, date, statusFilter]);
+  }), [data.transactions, data.cards, date, statusFilter]);
 
   const despesasPorCat = useMemo(() => {
     const m = {};
-    monthTx.filter(t=>t.type==="despesa").forEach(t => { m[t.category] = (m[t.category]||0) + Math.abs(t.value); });
+    monthTx.filter(t=>t.type==="despesa").forEach(t => { m[t.category] = (m[t.category]||0) - t.value; });
     return Object.entries(m).sort((a,b)=>b[1]-a[1]);
   }, [monthTx]);
   const totalDespesas = despesasPorCat.reduce((s,[,v])=>s+v,0);
@@ -1155,7 +1181,7 @@ function Relatorios({ data, date, setDate }) {
   });
 
   const receitas = monthTx.filter(t=>t.type==="receita").reduce((s,t)=>s+t.value,0);
-  const despesas = monthTx.filter(t=>t.type==="despesa").reduce((s,t)=>s+Math.abs(t.value),0);
+  const despesas = monthTx.filter(t=>t.type==="despesa").reduce((s,t)=>s-t.value,0);
   const saldo = receitas - despesas;
 
   const tags = useMemo(() => {
@@ -1255,7 +1281,7 @@ function Limites({ data, patch }) {
   const [draft, setDraft] = useState({ category: DESPESA_CATS[0], value: "", repeats: true, period: "Mensal" });
 
   const spentFor = (cat) => data.transactions.filter(t => t.type==="despesa" && t.category===cat)
-    .reduce((s,t)=>s+Math.abs(t.value),0);
+    .reduce((s,t)=>s-t.value,0);
 
   const totalLimite = data.limits.reduce((s,l)=>s+l.value,0);
   const totalGasto = data.limits.reduce((s,l)=>s+spentFor(l.category),0);
