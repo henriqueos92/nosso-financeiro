@@ -1374,14 +1374,14 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, my
   const [cardEditDraft, setCardEditDraft] = useState(null);
   function saveCardEdit() {
     if (!cardEditDraft.name) return;
-    patch(d => ({ ...d, cards: d.cards.map(c => c.id === cardEditDraft.id ? { ...c, name: cardEditDraft.name, bank: cardEditDraft.bank, limit: parseFloat(cardEditDraft.limit)||0, closingDay: parseInt(cardEditDraft.closingDay)||1, dueDay: parseInt(cardEditDraft.dueDay)||1 } : c) }));
+    patch(d => ({ ...d, cards: d.cards.map(c => c.id === cardEditDraft.id ? { ...c, name: cardEditDraft.name, bank: cardEditDraft.bank, limit: parseFloat(cardEditDraft.limit)||0, closingDay: parseInt(cardEditDraft.closingDay)||1, dueDay: parseInt(cardEditDraft.dueDay)||1, ownerId: cardEditDraft.ownerId || myPersonId } : c) }));
     setCardEditing(false); setCardEditDraft(null);
   }
   function removeCard() {
     patch(d => ({ ...d, cards: d.cards.filter(c => c.id !== cardEditDraft.id) }));
     setCardEditing(false); setCardEditDraft(null);
   }
-  const [cardDraft, setCardDraft] = useState({ name:"", bank:"nubank", limit:"" });
+  const [cardDraft, setCardDraft] = useState({ name:"", bank:"nubank", limit:"", ownerId: myPersonId });
   const [newCat, setNewCat] = useState("");
   const [catType, setCatType] = useState("despesa");
   const [newTag, setNewTag] = useState("");
@@ -1393,9 +1393,9 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, my
     if (!accDraft.name) return;
     const balance = parseFloat(accDraft.balance) || 0;
     if (accDraft.id) {
-      patch(d => ({ ...d, accounts: d.accounts.map(a => a.id === accDraft.id ? { ...a, name: accDraft.name, bank: accDraft.bank, balance } : a) }));
+      patch(d => ({ ...d, accounts: d.accounts.map(a => a.id === accDraft.id ? { ...a, name: accDraft.name, bank: accDraft.bank, balance, ownerId: accDraft.ownerId || myPersonId } : a) }));
     } else {
-      patch(d => ({ ...d, accounts: [...d.accounts, { id: uid(), name: accDraft.name, bank: accDraft.bank, balance, ownerId: myPersonId }] }));
+      patch(d => ({ ...d, accounts: [...d.accounts, { id: uid(), name: accDraft.name, bank: accDraft.bank, balance, ownerId: accDraft.ownerId || myPersonId }] }));
     }
     setAccEditing(false);
     setAccDraft(null);
@@ -1454,19 +1454,22 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, my
         <div style={{ padding: "10px 18px 0" }}>
           <div style={{ fontFamily:"Inter", fontSize:12, letterSpacing:1, textTransform:"uppercase", color:"var(--label)", fontWeight:700, marginBottom:10 }}>Contas cadastradas</div>
           <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-            {data.accounts.map(a => (
-              <Card key={a.id} onClick={()=>{ setAccDraft({ id:a.id, name:a.name, bank:a.bank, balance:String(a.balance) }); setAccEditing(true); }} style={{ display:"flex", alignItems:"center", gap:12, cursor:"pointer" }}>
+            {data.accounts.map(a => {
+              const owner = data.people.find(p => p.id === a.ownerId);
+              return (
+              <Card key={a.id} onClick={()=>{ setAccDraft({ id:a.id, name:a.name, bank:a.bank, balance:String(a.balance), ownerId: a.ownerId || myPersonId }); setAccEditing(true); }} style={{ display:"flex", alignItems:"center", gap:12, cursor:"pointer" }}>
                 <BankBadge bank={a.bank} size={40} />
                 <div style={{ flex:1 }}>
                   <div style={{ fontFamily:"Inter", fontSize:13.5, fontWeight:700 }}>{a.name}</div>
-                  <div style={{ fontFamily:"Inter", fontSize:11.5, color:"var(--muted-2)" }}>{allBanks()[a.bank]?.name}</div>
+                  <div style={{ fontFamily:"Inter", fontSize:11.5, color:"var(--muted-2)" }}>{allBanks()[a.bank]?.name}{owner ? ` · ${owner.name}` : ""}</div>
                 </div>
                 <div style={{ fontFamily:"IBM Plex Mono", fontSize:14, fontWeight:600 }}>{brl(a.balance)}</div>
               </Card>
-            ))}
+              );
+            })}
             {data.accounts.length === 0 && <Card><div style={{ fontFamily:"Inter", fontSize:13.5, color:"var(--muted)" }}>Nenhuma conta cadastrada ainda.</div></Card>}
           </div>
-          <button onClick={()=>{ setAccDraft({ id:null, name:"", bank:"nubank", balance:"" }); setAccEditing(true); }} style={{ ...primaryBtn, marginTop: 16 }}>+ Adicionar conta</button>
+          <button onClick={()=>{ setAccDraft({ id:null, name:"", bank:"nubank", balance:"", ownerId: myPersonId }); setAccEditing(true); }} style={{ ...primaryBtn, marginTop: 16 }}>+ Adicionar conta</button>
           <div style={{ fontFamily:"Inter", fontSize:11.5, color:"var(--muted-2)", marginTop:10, textAlign:"center" }}>
             O saldo é informado por você e atualizado automaticamente conforme lança receitas e despesas nessa conta.
           </div>
@@ -1475,6 +1478,13 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, my
         <Sheet open={accEditing} onClose={()=>setAccEditing(false)} title={accDraft?.id ? "Editar conta" : "Nova conta"}>
           {accDraft && (
             <div>
+              <Field label="Dono da conta">
+                <div style={{ display:"flex", gap:8 }}>
+                  {data.people.map(p => (
+                    <Pill key={p.id} active={accDraft.ownerId === p.id} onClick={()=>setAccDraft({...accDraft, ownerId: p.id})}>{p.name}</Pill>
+                  ))}
+                </div>
+              </Field>
               <Field label="Banco">
                 <select style={inputStyle} value={accDraft.bank} onChange={e=>setAccDraft({...accDraft, bank:e.target.value})}>
                   {Object.entries(allBanks()).map(([k,b])=><option key={k} value={k}>{b.name}</option>)}
@@ -1510,7 +1520,7 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, my
               </div>
               <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
                 {g.cards.map(c => (
-                  <Card key={c.id} onClick={()=>{ setCardEditDraft({ id:c.id, name:c.name, bank:c.bank, limit:String(c.limit), closingDay:String(c.closingDay), dueDay:String(c.dueDay) }); setCardEditing(true); }} style={{ cursor:"pointer" }}>
+                  <Card key={c.id} onClick={()=>{ setCardEditDraft({ id:c.id, name:c.name, bank:c.bank, limit:String(c.limit), closingDay:String(c.closingDay), dueDay:String(c.dueDay), ownerId: c.ownerId || myPersonId }); setCardEditing(true); }} style={{ cursor:"pointer" }}>
                     <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom: 10 }}>
                       <BankBadge bank={c.bank} size={38} />
                       <div style={{ flex:1 }}>
@@ -1532,6 +1542,13 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, my
           <button onClick={()=>setAddingCard(true)} style={primaryBtn}>+ Cadastrar cartão</button>
         </div>
         <Sheet open={addingCard} onClose={()=>setAddingCard(false)} title="Novo cartão">
+          <Field label="Dono do cartão">
+            <div style={{ display:"flex", gap:8 }}>
+              {data.people.map(p => (
+                <Pill key={p.id} active={cardDraft.ownerId === p.id} onClick={()=>setCardDraft({...cardDraft, ownerId: p.id})}>{p.name}</Pill>
+              ))}
+            </div>
+          </Field>
           <Field label="Apelido do cartão"><input style={inputStyle} value={cardDraft.name} onChange={e=>setCardDraft({...cardDraft,name:e.target.value})} /></Field>
           <Field label="Banco">
             <select style={inputStyle} value={cardDraft.bank} onChange={e=>setCardDraft({...cardDraft,bank:e.target.value})}>
@@ -1542,14 +1559,21 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, my
           <Field label="Limite do cartão"><input style={inputStyle} type="number" value={cardDraft.limit} onChange={e=>setCardDraft({...cardDraft,limit:e.target.value})} /></Field>
           <button onClick={()=>{
             if(!cardDraft.name||!cardDraft.limit) return;
-            patch(d=>({...d, cards:[...d.cards,{ id:uid(), name:cardDraft.name, bank:cardDraft.bank, limit:parseFloat(cardDraft.limit), closingDay:5, dueDay:12, invoice:0, ownerId: myPersonId }]}));
-            setAddingCard(false); setCardDraft({name:"",bank:"nubank",limit:""});
+            patch(d=>({...d, cards:[...d.cards,{ id:uid(), name:cardDraft.name, bank:cardDraft.bank, limit:parseFloat(cardDraft.limit), closingDay:5, dueDay:12, invoice:0, ownerId: cardDraft.ownerId || myPersonId }]}));
+            setAddingCard(false); setCardDraft({name:"",bank:"nubank",limit:"",ownerId:myPersonId});
           }} style={primaryBtn}>Salvar cartão</button>
         </Sheet>
         <NewBankSheet open={newBankOpen} onClose={()=>setNewBankOpen(false)} patch={patch} onCreated={(key)=>setCardDraft(d=>({...d, bank:key}))} />
         <Sheet open={cardEditing} onClose={()=>setCardEditing(false)} title="Editar cartão">
           {cardEditDraft && (
             <div>
+              <Field label="Dono do cartão">
+                <div style={{ display:"flex", gap:8 }}>
+                  {data.people.map(p => (
+                    <Pill key={p.id} active={cardEditDraft.ownerId === p.id} onClick={()=>setCardEditDraft({...cardEditDraft, ownerId: p.id})}>{p.name}</Pill>
+                  ))}
+                </div>
+              </Field>
               <Field label="Apelido do cartão"><input style={inputStyle} value={cardEditDraft.name} onChange={e=>setCardEditDraft({...cardEditDraft,name:e.target.value})} /></Field>
               <Field label="Banco">
                 <select style={inputStyle} value={cardEditDraft.bank} onChange={e=>setCardEditDraft({...cardEditDraft,bank:e.target.value})}>
