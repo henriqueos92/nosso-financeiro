@@ -18,7 +18,7 @@
 <body>
 <div id="root"></div>
 <script type="text/plain" id="app-source">
-const { useState, useEffect, useRef, useMemo } = React;
+const { useState, useEffect, useRef, useMemo, useContext } = React;
 
 /* ============================================================
    TOKENS
@@ -280,9 +280,17 @@ function MonthBar({ date, setDate, title }) {
 }
 const navBtn = { width: 34, height: 34, borderRadius: 999, border: "none", background: "var(--soft)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" };
 
+// Sheets renderizam num portal fora da área que rola (ver PortalContext em
+// FinanceApp). Se ficassem aninhados dentro do conteúdo rolável, o navegador
+// desloca o "position:absolute" junto com o scroll — abrindo o menu de ações
+// de um lançamento lá embaixo da lista faz ele aparecer grudado no topo em
+// vez de na parte de baixo da tela.
+const PortalContext = React.createContext(null);
+
 function Sheet({ open, onClose, children, title, large }) {
+  const portalTarget = useContext(PortalContext);
   if (!open) return null;
-  return (
+  const content = (
     <div style={{ position: "absolute", inset: 0, zIndex: 40 }}>
       <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(31,30,28,0.4)", touchAction: "none" }} />
       <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, background: "var(--card)", borderRadius: "22px 22px 0 0", padding: "14px 18px 26px", maxHeight: large ? "94%" : "78%", height: large ? "94%" : "auto", overflow: "hidden", overflowX: "hidden", boxShadow: "0 -10px 30px rgba(0,0,0,0.35)", display: "flex", flexDirection: "column", boxSizing: "border-box" }}>
@@ -295,6 +303,7 @@ function Sheet({ open, onClose, children, title, large }) {
       </div>
     </div>
   );
+  return portalTarget ? ReactDOM.createPortal(content, portalTarget) : content;
 }
 
 function Field({ label, children }) {
@@ -573,12 +582,6 @@ function invoiceMonthOf(dateISO, closingDay) {
   }
   return { year, month };
 }
-function shiftMonthKey(key, offset) {
-  const [y, m] = key.split("-").map(Number);
-  const total = (y * 12 + (m - 1)) + offset;
-  const ny = Math.floor(total / 12), nm = ((total % 12) + 12) % 12;
-  return `${ny}-${String(nm + 1).padStart(2, "0")}`;
-}
 function txDisplayMonth(t, cards) {
   if (t.invoiceMonth) {
     const [y, m] = t.invoiceMonth.split("-").map(Number);
@@ -644,12 +647,15 @@ function Lancamentos({ data, patch, date, setDate, myPersonId }) {
         const desc = m ? m[1].trim() : title.trim();
         const current = m ? parseInt(m[2]) : null;
         const total = m ? parseInt(m[3]) : null;
+        // Cada linha do CSV é a fatura real de um mês específico — mesmo uma
+        // compra parcelada aparece de novo, com um valor próprio, em cada
+        // fatura seguinte (parcela 1/3 em janeiro, 2/3 em fevereiro, etc).
+        // Por isso a chave de duplicidade é sempre a linha inteira (data +
+        // título + valor): isso identifica exatamente essa cobrança daquele
+        // mês, sem confundir com a mesma parcela cobrada em outro mês.
         const importKey = `${date}|${title}|${amount}`;
-        const groupKey = m ? `INST|${desc}|${total}|${amount}` : null;
-        const already = groupKey
-          ? data.transactions.some(t => t.importGroupKey === groupKey)
-          : data.transactions.some(t => t.importKey === importKey);
-        return { date, title, desc, amount, current, total, importKey, groupKey, already, checked: !already };
+        const already = data.transactions.some(t => t.importKey === importKey);
+        return { date, title, desc, amount, current, total, importKey, already, checked: !already };
       }).filter(Boolean);
       setImportRows(rows);
     };
@@ -663,18 +669,13 @@ function Lancamentos({ data, patch, date, setDate, myPersonId }) {
     const toImport = importRows.filter(r => r.checked && !r.already);
     const news = [];
     toImport.forEach(r => {
-      const common = { type: "despesa", category: "Outros", accountId: null, cardId: importCardId, tag: "", paymentMethod: "cartao", personId: myPersonId, createdAt: Date.now(), importKey: r.importKey, importGroupKey: r.groupKey };
-      if (r.total) {
-        const groupId = uid();
-        const base = parseLocalDate(r.date);
-        for (let i = 1; i <= r.total; i++) {
-          const offset = i - r.current;
-          const d2 = new Date(base.getFullYear(), base.getMonth() + offset, base.getDate());
-          news.push({ id: uid(), date: toISO(d2), desc: r.desc, value: -r.amount, status: i <= r.current ? "resolvido" : "pendente", fixed: false, installment: { groupId, current: i, total: r.total, liveAt: r.current }, invoiceMonth: shiftMonthKey(importInvoiceMonth, offset), ...common });
-        }
-      } else {
-        news.push({ id: uid(), date: r.date, desc: r.desc, value: -r.amount, status: "resolvido", fixed: false, invoiceMonth: importInvoiceMonth, ...common });
-      }
+      const common = { type: "despesa", category: "Outros", accountId: null, cardId: importCardId, tag: "", paymentMethod: "cartao", personId: myPersonId, createdAt: Date.now(), importKey: r.importKey };
+      // Cada linha vira exatamente um lançamento — ela já é a cobrança real
+      // dessa fatura. Se for uma parcela (ex: "2/3"), guarda current/total só
+      // pra mostrar "(2/3)" na lista; current===liveAt garante que ela sempre
+      // conta no valor da fatura (sem o pulo de parcela passada/futura usado
+      // no lançamento manual parcelado).
+      news.push({ id: uid(), date: r.date, desc: r.desc, value: -r.amount, status: "resolvido", fixed: false, installment: r.total ? { groupId: uid(), current: r.current, total: r.total, liveAt: r.current } : null, invoiceMonth: importInvoiceMonth, ...common });
     });
     patch(d => {
       let next = { ...d, transactions: [...news, ...d.transactions] };
@@ -1787,6 +1788,8 @@ function FinanceApp() {
   const [pinValue, setPinValue] = useState("");
   const [pinError, setPinError] = useState(false);
   const [hideValues, setHideValues] = useState(true);
+  const [appRoot, setAppRoot] = useState(null);
+  const appRootRef = useRef(null);
   const saveTimer = useRef(null);
   const pendingSaveRef = useRef(null);
   const hideValuesTimer = useRef(null);
@@ -1942,8 +1945,9 @@ function FinanceApp() {
   ];
 
   return (
-    <div className="fin-app" data-theme={isDark ? "dark" : "light"} style={{ fontFamily: "Inter, sans-serif", color: "var(--ink)", width: "100%", maxWidth: 430, margin: "0 auto", background: "var(--bg)", height: "100dvh", paddingTop: "env(safe-area-inset-top)", display: "flex", flexDirection: "column", position: "relative", overflow: "hidden", boxShadow: "0 20px 60px -20px rgba(16,24,40,0.4)" }}>
+    <div ref={node => { if (node && appRootRef.current !== node) { appRootRef.current = node; setAppRoot(node); } }} className="fin-app" data-theme={isDark ? "dark" : "light"} style={{ fontFamily: "Inter, sans-serif", color: "var(--ink)", width: "100%", maxWidth: 430, margin: "0 auto", background: "var(--bg)", height: "100dvh", paddingTop: "env(safe-area-inset-top)", display: "flex", flexDirection: "column", position: "relative", overflow: "hidden", boxShadow: "0 20px 60px -20px rgba(16,24,40,0.4)" }}>
       <style>{FONT_IMPORT}{THEME_CSS}{`* { box-sizing: border-box; } select { -webkit-appearance:none; appearance:none; }`}</style>
+      <PortalContext.Provider value={appRoot}>
 
       <div style={{ position: "relative", flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", WebkitOverflowScrolling: "touch" }}>
         {tab === "inicio" && <Inicio data={data} patch={patch} goManage={() => setTab("conta_conexoes")} goCards={() => setTab("conta_cartoes")} setNotifOpen={setNotifOpen} onReload={reloadFromCloud} syncing={syncing} lastSync={lastSync} isDark={isDark} toggleTheme={toggleTheme} hideValues={hideValues} toggleHideValues={() => setHideValues(v => !v)} myPersonId={myPersonId} myPerson={myPerson} partnerName={partner?.name} />}
@@ -1975,6 +1979,7 @@ function FinanceApp() {
           );
         })}
       </div>
+      </PortalContext.Provider>
     </div>
   );
 }
