@@ -73,20 +73,28 @@ const STORAGE_KEY = "financeiro-casal:v1";
 const uid = () => Math.random().toString(36).slice(2, 10);
 const brl = (n) => (n < 0 ? "-" : "") + "R$ " + Math.abs(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-// Applies (sign=1) or reverses (sign=-1) a transaction's effect on account balance
-// or credit card invoice. For installments, only the "live" parcel (the one being
-// entered now) moves money — past/future parcels exist for records but don't
-// double-count, since the past already happened and the future hasn't yet.
+// Applies (sign=1) or reverses (sign=-1) a transaction's effect on account balance.
+// For installments, only the "live" parcel (the one being entered now) moves money —
+// past/future parcels exist for records but don't double-count, since the past
+// already happened and the future hasn't yet. Account balance has a manually
+// entered starting point, so it's tracked as a running total. Card invoices,
+// on the other hand, always start at zero and only ever reflect existing
+// transactions, so they're computed on the fly from data.transactions instead
+// (see cardInvoice) — that way an invoice can never drift out of sync with
+// the lançamentos that are supposed to make it up.
 function applyTxEffect(d, tx, sign) {
   if (tx.installment && tx.installment.current !== tx.installment.liveAt) return d;
   if (tx.accountId) {
     return { ...d, accounts: d.accounts.map(a => a.id === tx.accountId ? { ...a, balance: a.balance + sign * tx.value } : a) };
   }
-  if (tx.cardId) {
-    const amt = Math.abs(tx.value);
-    return { ...d, cards: d.cards.map(c => c.id === tx.cardId ? { ...c, invoice: c.invoice + sign * amt } : c) };
-  }
   return d;
+}
+function cardInvoice(transactions, cardId) {
+  return transactions.reduce((s, t) => {
+    if (t.cardId !== cardId) return s;
+    if (t.installment && t.installment.current !== t.installment.liveAt) return s;
+    return s + Math.abs(t.value);
+  }, 0);
 }
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const toISO = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
@@ -303,7 +311,7 @@ function Inicio({ data, patch, goManage, goCards, setNotifOpen, onReload, syncin
   });
 
   const saldoGeral = data.accounts.reduce((s, a) => s + a.balance, 0);
-  const totalFaturas = data.cards.reduce((s, c) => s + c.invoice, 0);
+  const totalFaturas = data.cards.reduce((s, c) => s + cardInvoice(data.transactions, c.id), 0);
   const unread = data.notifications.filter(n => !n.read).length;
 
   // Contas sem "dono" definido (cadastradas antes dessa função existir) aparecem
@@ -474,13 +482,14 @@ function Inicio({ data, patch, goManage, goCards, setNotifOpen, onReload, syncin
                 <div style={{ fontFamily: "Inter", fontSize: 12.5, fontWeight: 700, color: "var(--ink)", marginBottom: 6 }}>Fatura Atual {g.person ? g.person.name : ""}</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {g.cards.map(c => {
-                    const disponivel = c.limit - c.invoice;
+                    const invoice = cardInvoice(data.transactions, c.id);
+                    const disponivel = c.limit - invoice;
                     return (
                       <Card key={c.id} onClick={() => setFaturasOpen(true)} style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}>
                         <BankBadge bank={c.bank} size={36} />
                         <div style={{ flex: 1 }}>
                           <div style={{ fontFamily: "Inter", fontSize: 13, fontWeight: 700 }}>{allBanks()[c.bank]?.name || c.bank}</div>
-                          <div style={{ fontFamily: "IBM Plex Mono", fontSize: 16, fontWeight: 600, color: "var(--accent)" }}>{brl(c.invoice)}</div>
+                          <div style={{ fontFamily: "IBM Plex Mono", fontSize: 16, fontWeight: 600, color: "var(--accent)" }}>{brl(invoice)}</div>
                           <div style={{ fontFamily: "Inter", fontSize: 11, color: "var(--muted-2)" }}>limite disponível {brl(disponivel)}</div>
                         </div>
                       </Card>
@@ -495,7 +504,7 @@ function Inicio({ data, patch, goManage, goCards, setNotifOpen, onReload, syncin
 
       <Sheet open={faturasOpen} onClose={() => setFaturasOpen(false)} title="Faturas em aberto">
         {cardsByOwner.map(g => {
-          const subtotal = g.cards.reduce((s,c) => s + c.invoice, 0);
+          const subtotal = g.cards.reduce((s,c) => s + cardInvoice(data.transactions, c.id), 0);
           return (
             <div key={g.person?.id || "sem-dono"} style={{ marginBottom: 16 }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom: 8 }}>
@@ -512,7 +521,7 @@ function Inicio({ data, patch, goManage, goCards, setNotifOpen, onReload, syncin
                       <div style={{ fontFamily: "Inter", fontSize: 13.5, fontWeight: 700 }}>{c.name}</div>
                       <div style={{ fontFamily: "Inter", fontSize: 11.5, color: "var(--muted-2)" }}>Vence dia {c.dueDay}</div>
                     </div>
-                    <div style={{ fontFamily: "IBM Plex Mono", fontSize: 15, fontWeight: 600, color: "var(--accent)" }}>{brl(c.invoice)}</div>
+                    <div style={{ fontFamily: "IBM Plex Mono", fontSize: 15, fontWeight: 600, color: "var(--accent)" }}>{brl(cardInvoice(data.transactions, c.id))}</div>
                   </Card>
                 ))}
               </div>
@@ -1536,7 +1545,7 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, my
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:"var(--soft)", borderRadius:12, padding:"10px 12px" }}>
                       <div>
                         <div style={{ fontFamily:"Inter", fontSize:11, color:"var(--muted-2)", fontWeight:700 }}>Fatura atual · vence dia {c.dueDay}</div>
-                        <div style={{ fontFamily:"IBM Plex Mono", fontSize:16, fontWeight:600, color:"var(--accent)" }}>{brl(c.invoice)}</div>
+                        <div style={{ fontFamily:"IBM Plex Mono", fontSize:16, fontWeight:600, color:"var(--accent)" }}>{brl(cardInvoice(data.transactions, c.id))}</div>
                       </div>
                     </div>
                   </Card>
@@ -1564,7 +1573,7 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, my
           <Field label="Limite do cartão"><input style={inputStyle} type="number" value={cardDraft.limit} onChange={e=>setCardDraft({...cardDraft,limit:e.target.value})} /></Field>
           <button onClick={()=>{
             if(!cardDraft.name||!cardDraft.limit) return;
-            patch(d=>({...d, cards:[...d.cards,{ id:uid(), name:cardDraft.name, bank:cardDraft.bank, limit:parseFloat(cardDraft.limit), closingDay:5, dueDay:12, invoice:0, ownerId: cardDraft.ownerId || myPersonId }]}));
+            patch(d=>({...d, cards:[...d.cards,{ id:uid(), name:cardDraft.name, bank:cardDraft.bank, limit:parseFloat(cardDraft.limit), closingDay:5, dueDay:12, ownerId: cardDraft.ownerId || myPersonId }]}));
             setAddingCard(false); setCardDraft({name:"",bank:"nubank",limit:"",ownerId:myPersonId});
           }} style={primaryBtn}>Salvar cartão</button>
         </Sheet>
