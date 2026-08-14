@@ -1368,7 +1368,7 @@ function NewBankSheet({ open, onClose, onCreated, patch }) {
 
 function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, myPerson, switchPerson }) {
   const [screen, setScreen] = useState(initialScreen || "main"); // main | edit | conexoes | cartoes | categorias | tags
-  const [editDraft, setEditDraft] = useState(myPerson || { name: "", email: "", birthdate: "" });
+  const [editDraft, setEditDraft] = useState(myPerson ? { ...myPerson, password: "" } : { name: "", email: "", birthdate: "" });
   const [addingCard, setAddingCard] = useState(false);
   const [cardEditing, setCardEditing] = useState(false);
   const [cardEditDraft, setCardEditDraft] = useState(null);
@@ -1439,9 +1439,14 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, my
         <div style={{ padding: "10px 18px 0" }}>
           <Field label="Nome"><input style={inputStyle} value={editDraft.name} onChange={e=>setEditDraft({...editDraft,name:e.target.value})} /></Field>
           <Field label="E-mail"><input style={inputStyle} value={editDraft.email} onChange={e=>setEditDraft({...editDraft,email:e.target.value})} /></Field>
-          <Field label="Senha"><input style={inputStyle} type="password" placeholder="••••••••" onChange={e=>setEditDraft({...editDraft,password:e.target.value})} /></Field>
+          <Field label={myPerson?.password ? "Nova senha (deixe em branco pra manter a atual)" : "Senha (opcional)"}>
+            <input style={inputStyle} type="password" placeholder="••••••••" value={editDraft.password || ""} onChange={e=>setEditDraft({...editDraft,password:e.target.value})} />
+          </Field>
+          <div style={{ fontFamily: "Inter", fontSize: 11.5, color: "var(--muted-2)", marginTop: -8, marginBottom: 14 }}>
+            {myPerson?.password ? "Essa conta já pede senha ao selecionar seu nome na troca de pessoa." : "Se você definir uma senha, ela será pedida sempre que alguém selecionar seu nome na tela \"Quem é você?\"."}
+          </div>
           <Field label="Data de nascimento"><input style={inputStyle} type="date" value={editDraft.birthdate} onChange={e=>setEditDraft({...editDraft,birthdate:e.target.value})} /></Field>
-          <button onClick={()=>{ patch(d=>({...d, people: d.people.map(p => p.id === myPersonId ? { ...p, name: editDraft.name, email: editDraft.email, birthdate: editDraft.birthdate } : p) })); back(); }} style={primaryBtn}>Salvar alterações</button>
+          <button onClick={()=>{ patch(d=>({...d, people: d.people.map(p => p.id === myPersonId ? { ...p, name: editDraft.name, email: editDraft.email, birthdate: editDraft.birthdate, ...(editDraft.password ? { password: editDraft.password } : {}) } : p) })); back(); }} style={primaryBtn}>Salvar alterações</button>
         </div>
       </div>
     );
@@ -1655,7 +1660,7 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, my
           {(myPerson?.name || "?").slice(0,1)}
         </div>
         <div style={{ fontFamily:"Source Serif 4, serif", fontSize:20, fontWeight:600, color:"var(--accent)", marginTop:10 }}>{myPerson?.name || "Você"}</div>
-        <button onClick={()=>{ setEditDraft(myPerson || {name:"",email:"",birthdate:""}); setScreen("edit"); }} style={{ marginTop:8, border:"1.5px solid var(--accent)", background:"transparent", color:"var(--accent)", borderRadius:10, padding:"8px 16px", fontFamily:"Inter", fontWeight:700, fontSize:12.5, cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}>
+        <button onClick={()=>{ setEditDraft(myPerson ? { ...myPerson, password: "" } : {name:"",email:"",birthdate:""}); setScreen("edit"); }} style={{ marginTop:8, border:"1.5px solid var(--accent)", background:"transparent", color:"var(--accent)", borderRadius:10, padding:"8px 16px", fontFamily:"Inter", fontWeight:700, fontSize:12.5, cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}>
           <Icon name="edit" size={14} /> Editar perfil
         </button>
         <button onClick={switchPerson} style={{ marginTop:8, border:"none", background:"transparent", color:"var(--muted-2)", fontFamily:"Inter", fontWeight:600, fontSize:12, cursor:"pointer" }}>
@@ -1717,6 +1722,9 @@ function FinanceApp() {
   const [notifOpen, setNotifOpen] = useState(false);
   const [isDark, setIsDark] = useState(loadThemeSync);
   const [myPersonId, setMyPersonIdState] = useState(loadPersonSync);
+  const [pinTarget, setPinTarget] = useState(null);
+  const [pinValue, setPinValue] = useState("");
+  const [pinError, setPinError] = useState(false);
   const saveTimer = useRef(null);
   const pendingSaveRef = useRef(null);
 
@@ -1747,11 +1755,22 @@ function FinanceApp() {
   function choosePerson(id) {
     try { localStorage.setItem(PERSON_KEY, id); } catch (e) {}
     setMyPersonIdState(id);
+    setPinTarget(null); setPinValue(""); setPinError(false);
   }
   function switchPerson() {
     try { localStorage.removeItem(PERSON_KEY); } catch (e) {}
     setMyPersonIdState(null);
     setTab("inicio");
+    setPinTarget(null); setPinValue(""); setPinError(false);
+  }
+  function selectPerson(p) {
+    if (p.password) { setPinTarget(p.id); setPinValue(""); setPinError(false); }
+    else choosePerson(p.id);
+  }
+  function tryPinLogin() {
+    const p = data && data.people.find(x => x.id === pinTarget);
+    if (p && pinValue === p.password) choosePerson(p.id);
+    else setPinError(true);
   }
 
   function patch(fn) {
@@ -1790,21 +1809,40 @@ function FinanceApp() {
     return (
       <div className="fin-app" data-theme={isDark ? "dark" : "light"} style={{ fontFamily: "Inter, sans-serif", color: "var(--ink)", width: "100%", maxWidth: 430, margin: "0 auto", background: "var(--bg)", height: "100dvh", paddingTop: "calc(env(safe-area-inset-top) + 24px)", paddingLeft: 24, paddingRight: 24, paddingBottom: 24, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", boxSizing: "border-box", position: "relative", overflow: "hidden", boxShadow: "0 20px 60px -20px rgba(16,24,40,0.4)" }}>
         <style>{FONT_IMPORT}{THEME_CSS}{`* { box-sizing: border-box; }`}</style>
-        <div style={{ fontFamily: "Source Serif 4, serif", fontSize: 24, fontWeight: 600, color: "var(--accent)", marginBottom: 6, textAlign: "center" }}>Quem é você?</div>
-        <div style={{ fontFamily: "Inter", fontSize: 13.5, color: "var(--muted)", marginBottom: 28, textAlign: "center" }}>
-          Esse aparelho vai lembrar essa escolha. Assim dá pra saber quem lançou o quê.
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%", maxWidth: 320 }}>
-          {data.people.map(p => (
-            <button key={p.id} onClick={() => choosePerson(p.id)} style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 18px", borderRadius: 16, border: "1.5px solid var(--border)", background: "var(--card)", cursor: "pointer" }}>
-              <div style={{ width: 44, height: 44, borderRadius: "50%", background: "#16283D", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Source Serif 4, serif", fontSize: 18, fontWeight: 600, flexShrink: 0 }}>{p.name.slice(0,1)}</div>
-              <div style={{ fontFamily: "Inter", fontSize: 15.5, fontWeight: 700, color: "var(--ink)" }}>{p.name}</div>
-            </button>
-          ))}
-        </div>
-        <div style={{ fontFamily: "Inter", fontSize: 11.5, color: "var(--muted-2)", marginTop: 24, textAlign: "center" }}>
-          Os nomes podem ser alterados depois em Conta → Editar perfil.
-        </div>
+        {pinTarget ? (
+          <React.Fragment>
+            <div style={{ width: 64, height: 64, borderRadius: "50%", background: "#16283D", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Source Serif 4, serif", fontSize: 24, fontWeight: 600, marginBottom: 14 }}>
+              {(data.people.find(p=>p.id===pinTarget)?.name || "?").slice(0,1)}
+            </div>
+            <div style={{ fontFamily: "Source Serif 4, serif", fontSize: 21, fontWeight: 600, color: "var(--accent)", marginBottom: 22, textAlign: "center" }}>{data.people.find(p=>p.id===pinTarget)?.name}</div>
+            <div style={{ width: "100%", maxWidth: 320 }}>
+              <Field label="Senha">
+                <input autoFocus type="password" style={inputStyle} value={pinValue} onChange={e=>{ setPinValue(e.target.value); setPinError(false); }} onKeyDown={e=>{ if (e.key==="Enter") tryPinLogin(); }} />
+              </Field>
+              {pinError && <div style={{ fontFamily: "Inter", fontSize: 12.5, color: "#A13D46", marginTop: -8, marginBottom: 14 }}>Senha incorreta.</div>}
+              <button onClick={tryPinLogin} style={primaryBtn}>Entrar</button>
+              <button onClick={()=>{ setPinTarget(null); setPinValue(""); setPinError(false); }} style={{ width:"100%", marginTop: 10, padding:"13px", borderRadius:13, border:"none", background:"transparent", color:"var(--muted)", fontFamily:"Inter", fontWeight:600, fontSize:14, cursor:"pointer" }}>Voltar</button>
+            </div>
+          </React.Fragment>
+        ) : (
+          <React.Fragment>
+            <div style={{ fontFamily: "Source Serif 4, serif", fontSize: 24, fontWeight: 600, color: "var(--accent)", marginBottom: 6, textAlign: "center" }}>Quem é você?</div>
+            <div style={{ fontFamily: "Inter", fontSize: 13.5, color: "var(--muted)", marginBottom: 28, textAlign: "center" }}>
+              Esse aparelho vai lembrar essa escolha. Assim dá pra saber quem lançou o quê.
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%", maxWidth: 320 }}>
+              {data.people.map(p => (
+                <button key={p.id} onClick={() => selectPerson(p)} style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 18px", borderRadius: 16, border: "1.5px solid var(--border)", background: "var(--card)", cursor: "pointer" }}>
+                  <div style={{ width: 44, height: 44, borderRadius: "50%", background: "#16283D", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Source Serif 4, serif", fontSize: 18, fontWeight: 600, flexShrink: 0 }}>{p.name.slice(0,1)}</div>
+                  <div style={{ fontFamily: "Inter", fontSize: 15.5, fontWeight: 700, color: "var(--ink)" }}>{p.name}</div>
+                </button>
+              ))}
+            </div>
+            <div style={{ fontFamily: "Inter", fontSize: 11.5, color: "var(--muted-2)", marginTop: 24, textAlign: "center" }}>
+              Os nomes podem ser alterados depois em Conta → Editar perfil.
+            </div>
+          </React.Fragment>
+        )}
       </div>
     );
   }
