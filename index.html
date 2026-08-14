@@ -140,8 +140,8 @@ function seedData() {
    3. Em "API Keys", copie sua X-Master-Key
    4. Cole os dois valores abaixo
 ============================================================ */
-const JSONBIN_ID = "6a7d0166da38895dfedce2f3";
-const JSONBIN_KEY = "$2a$10$DiRKf0xhBDltF94YODaw7.MtLOXK7Bp8DyBSAZUi30zETV8zWQ2F2";
+const JSONBIN_ID = "COLOQUE_SEU_BIN_ID_AQUI";
+const JSONBIN_KEY = "COLOQUE_SUA_X-MASTER-KEY_AQUI";
 const JSONBIN_URL = `https://api.jsonbin.io/v3/b/${JSONBIN_ID}`;
 
 // Adds fields introduced after a bin was first created, so older saved data
@@ -460,19 +460,27 @@ function Inicio({ data, patch, goManage, goCards, setNotifOpen, onReload, syncin
       {data.cards.length > 0 && (
         <div style={{ padding: "16px 18px 0" }}>
           <div style={{ fontFamily: "Inter", fontSize: 12, letterSpacing: 1, textTransform: "uppercase", color: "var(--label)", fontWeight: 700, marginBottom: 8 }}>Faturas em aberto</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {cardsByOwner.map(g => {
-              const subtotal = g.cards.reduce((s,c)=>s+c.invoice, 0);
-              return (
-                <Card key={g.person?.id || "sem-dono"} onClick={() => setFaturasOpen(true)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--soft)", cursor: "pointer" }}>
-                  <div>
-                    <div style={{ fontFamily: "Inter", fontSize: 12, color: "var(--muted-2)", fontWeight: 700 }}>{g.person ? `Faturas de ${g.person.id === myPersonId ? "Você" : g.person.name}` : "Outras faturas"} ({g.cards.length})</div>
-                    <div style={{ fontFamily: "Source Serif 4, serif", fontSize: 21, fontWeight: 600, color: "var(--accent)" }}>{brl(subtotal)}</div>
-                  </div>
-                  <Icon name="card" color="var(--accent)" size={26} />
-                </Card>
-              );
-            })}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {cardsByOwner.map(g => (
+              <div key={g.person?.id || "sem-dono"}>
+                <div style={{ fontFamily: "Inter", fontSize: 12.5, fontWeight: 700, color: "var(--ink)", marginBottom: 6 }}>Fatura Atual {g.person ? (g.person.id === myPersonId ? "Você" : g.person.name) : ""}</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {g.cards.map(c => {
+                    const disponivel = c.limit - c.invoice;
+                    return (
+                      <Card key={c.id} onClick={() => setFaturasOpen(true)} style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}>
+                        <BankBadge bank={c.bank} size={36} />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontFamily: "Inter", fontSize: 13, fontWeight: 700 }}>{allBanks()[c.bank]?.name || c.bank}</div>
+                          <div style={{ fontFamily: "IBM Plex Mono", fontSize: 16, fontWeight: 600, color: "var(--accent)" }}>{brl(c.invoice)}</div>
+                          <div style={{ fontFamily: "Inter", fontSize: 11, color: "var(--muted-2)" }}>limite disponível {brl(disponivel)}</div>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -1354,6 +1362,17 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, my
   const [screen, setScreen] = useState(initialScreen || "main"); // main | edit | conexoes | cartoes | categorias | tags
   const [editDraft, setEditDraft] = useState(myPerson || { name: "", email: "", birthdate: "" });
   const [addingCard, setAddingCard] = useState(false);
+  const [cardEditing, setCardEditing] = useState(false);
+  const [cardEditDraft, setCardEditDraft] = useState(null);
+  function saveCardEdit() {
+    if (!cardEditDraft.name) return;
+    patch(d => ({ ...d, cards: d.cards.map(c => c.id === cardEditDraft.id ? { ...c, name: cardEditDraft.name, bank: cardEditDraft.bank, limit: parseFloat(cardEditDraft.limit)||0, closingDay: parseInt(cardEditDraft.closingDay)||1, dueDay: parseInt(cardEditDraft.dueDay)||1 } : c) }));
+    setCardEditing(false); setCardEditDraft(null);
+  }
+  function removeCard() {
+    patch(d => ({ ...d, cards: d.cards.filter(c => c.id !== cardEditDraft.id) }));
+    setCardEditing(false); setCardEditDraft(null);
+  }
   const [cardDraft, setCardDraft] = useState({ name:"", bank:"nubank", limit:"" });
   const [newCat, setNewCat] = useState("");
   const [catType, setCatType] = useState("despesa");
@@ -1483,7 +1502,7 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, my
               </div>
               <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
                 {g.cards.map(c => (
-                  <Card key={c.id}>
+                  <Card key={c.id} onClick={()=>{ setCardEditDraft({ id:c.id, name:c.name, bank:c.bank, limit:String(c.limit), closingDay:String(c.closingDay), dueDay:String(c.dueDay) }); setCardEditing(true); }} style={{ cursor:"pointer" }}>
                     <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom: 10 }}>
                       <BankBadge bank={c.bank} size={38} />
                       <div style={{ flex:1 }}>
@@ -1520,6 +1539,23 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, my
           }} style={primaryBtn}>Salvar cartão</button>
         </Sheet>
         <NewBankSheet open={newBankOpen} onClose={()=>setNewBankOpen(false)} patch={patch} onCreated={(key)=>setCardDraft(d=>({...d, bank:key}))} />
+        <Sheet open={cardEditing} onClose={()=>setCardEditing(false)} title="Editar cartão">
+          {cardEditDraft && (
+            <div>
+              <Field label="Apelido do cartão"><input style={inputStyle} value={cardEditDraft.name} onChange={e=>setCardEditDraft({...cardEditDraft,name:e.target.value})} /></Field>
+              <Field label="Banco">
+                <select style={inputStyle} value={cardEditDraft.bank} onChange={e=>setCardEditDraft({...cardEditDraft,bank:e.target.value})}>
+                  {Object.entries(allBanks()).map(([k,b])=><option key={k} value={k}>{b.name}</option>)}
+                </select>
+              </Field>
+              <Field label="Limite do cartão"><input style={inputStyle} type="number" value={cardEditDraft.limit} onChange={e=>setCardEditDraft({...cardEditDraft,limit:e.target.value})} /></Field>
+              <Field label="Dia de fechamento"><input style={inputStyle} type="number" min="1" max="31" value={cardEditDraft.closingDay} onChange={e=>setCardEditDraft({...cardEditDraft,closingDay:e.target.value})} /></Field>
+              <Field label="Dia de vencimento"><input style={inputStyle} type="number" min="1" max="31" value={cardEditDraft.dueDay} onChange={e=>setCardEditDraft({...cardEditDraft,dueDay:e.target.value})} /></Field>
+              <button onClick={saveCardEdit} style={primaryBtn}>Salvar alterações</button>
+              <button onClick={removeCard} style={{ ...secondaryBtn, marginTop: 10 }}>Excluir cartão</button>
+            </div>
+          )}
+        </Sheet>
       </div>
     );
   }
