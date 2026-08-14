@@ -655,7 +655,14 @@ function Lancamentos({ data, patch, date, setDate, myPersonId }) {
         // mês, sem confundir com a mesma parcela cobrada em outro mês.
         const importKey = `${date}|${title}|${amount}`;
         const already = data.transactions.some(t => t.importKey === importKey);
-        return { date, title, desc, amount, current, total, importKey, already, checked: !already };
+        // Mesma data e mesma descrição/parcela, mas valor diferente — quase
+        // certamente é a mesma cobrança exportada com centavos diferentes
+        // (arredondamento do banco). Não teria batido no check acima, então
+        // sinaliza pra revisão em vez de importar às cegas.
+        const similar = !already
+          ? data.transactions.find(t => t.date === date && t.desc === desc && (t.installment ? t.installment.current : null) === current)
+          : null;
+        return { date, title, desc, amount, current, total, importKey, already, similarValue: similar ? -similar.value : null, checked: !already && !similar };
       }).filter(Boolean);
       setImportRows(rows);
     };
@@ -1141,15 +1148,22 @@ function Lancamentos({ data, patch, date, setDate, myPersonId }) {
             <div style={{ fontFamily:"Inter", fontSize:12, color:"var(--muted)", margin:"6px 0 12px" }}>{importRows.length} lançamento(s) encontrado(s). Desmarque o que não quiser importar.</div>
             <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:14 }}>
               {importRows.map((r,i) => (
-                <Card key={i} onClick={() => !r.already && toggleImportRow(i)} style={{ display:"flex", alignItems:"center", gap:10, padding:10, opacity: r.already ? 0.5 : 1, cursor: r.already ? "default" : "pointer" }}>
-                  <div style={{ width:20, height:20, borderRadius:6, border:"1.5px solid var(--accent)", background: r.checked ? "var(--accent)" : "transparent", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
-                    {r.checked && <Icon name="check" size={13} color="#fff" />}
+                <Card key={i} onClick={() => !r.already && toggleImportRow(i)} style={{ display:"flex", flexDirection:"column", gap:8, padding:10, opacity: r.already ? 0.5 : 1, cursor: r.already ? "default" : "pointer", border: r.similarValue != null ? "1.5px solid #A9834B" : "1.5px solid transparent" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                    <div style={{ width:20, height:20, borderRadius:6, border:"1.5px solid var(--accent)", background: r.checked ? "var(--accent)" : "transparent", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                      {r.checked && <Icon name="check" size={13} color="#fff" />}
+                    </div>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontFamily:"Inter", fontSize:13, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.desc}{r.total ? ` (${r.current}/${r.total})` : ""}</div>
+                      <div style={{ fontFamily:"Inter", fontSize:11, color:"var(--muted-2)" }}>{r.date.split("-").reverse().join("/")}{r.already ? " · já importado" : ""}</div>
+                    </div>
+                    <div style={{ fontFamily:"IBM Plex Mono", fontSize:13, fontWeight:600, color: r.amount < 0 ? "#1E7F63" : "#A13D46" }}>{brl(-r.amount)}</div>
                   </div>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontFamily:"Inter", fontSize:13, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.desc}{r.total ? ` (${r.current}/${r.total})` : ""}</div>
-                    <div style={{ fontFamily:"Inter", fontSize:11, color:"var(--muted-2)" }}>{r.date.split("-").reverse().join("/")}{r.already ? " · já importado" : ""}</div>
-                  </div>
-                  <div style={{ fontFamily:"IBM Plex Mono", fontSize:13, fontWeight:600, color: r.amount < 0 ? "#1E7F63" : "#A13D46" }}>{brl(-r.amount)}</div>
+                  {r.similarValue != null && (
+                    <div style={{ fontFamily:"Inter", fontSize:11.5, color:"#A9834B", background:"rgba(169,131,75,0.12)", borderRadius:8, padding:"6px 8px" }}>
+                      Já existe um lançamento parecido nesse dia, com valor {brl(r.similarValue)}. Confira antes de marcar — pode ser a mesma cobrança com centavos diferentes.
+                    </div>
+                  )}
                 </Card>
               ))}
             </div>
