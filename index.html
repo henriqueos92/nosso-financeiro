@@ -89,16 +89,25 @@ function applyTxEffect(d, tx, sign) {
   }
   return d;
 }
+// "Fatura atual" é só o ciclo que está aberto agora (ex: fecha 2/9, vence
+// 9/9) — não a soma de tudo que já foi importado. Com parcelas gerando
+// lançamentos de meses futuros, somar tudo inflava o valor mostrado muito
+// além do que a fatura realmente cobra neste momento.
+function currentInvoiceMonthKey(card) {
+  return invoiceMonthKeyOf(toISO(new Date()), card.closingDay);
+}
 // Compras entram com value negativo (convenção de despesa) e somam na fatura;
 // estornos importados do banco entram com value positivo e abatem da fatura —
 // por isso a soma usa o sinal de value em vez de Math.abs. Um mês marcado
 // como pago (card.paidMonths) sai da conta, sem apagar o histórico.
 function cardInvoice(transactions, card) {
   const paid = new Set(card.paidMonths || []);
+  const currentKey = currentInvoiceMonthKey(card);
   return transactions.reduce((s, t) => {
     if (t.cardId !== card.id) return s;
     if (t.installment && t.installment.current !== t.installment.liveAt) return s;
     const key = t.invoiceMonth || invoiceMonthKeyOf(t.date, card.closingDay);
+    if (key !== currentKey) return s;
     if (paid.has(key)) return s;
     return s - t.value;
   }, 0);
