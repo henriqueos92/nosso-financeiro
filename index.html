@@ -91,13 +91,27 @@ function applyTxEffect(d, tx, sign) {
 }
 // Compras entram com value negativo (convenção de despesa) e somam na fatura;
 // estornos importados do banco entram com value positivo e abatem da fatura —
-// por isso a soma usa o sinal de value em vez de Math.abs.
-function cardInvoice(transactions, cardId) {
+// por isso a soma usa o sinal de value em vez de Math.abs. Um mês marcado
+// como pago (card.paidMonths) sai da conta, sem apagar o histórico.
+function cardInvoice(transactions, card) {
+  const paid = new Set(card.paidMonths || []);
   return transactions.reduce((s, t) => {
-    if (t.cardId !== cardId) return s;
+    if (t.cardId !== card.id) return s;
     if (t.installment && t.installment.current !== t.installment.liveAt) return s;
+    const key = t.invoiceMonth || invoiceMonthKeyOf(t.date, card.closingDay);
+    if (paid.has(key)) return s;
     return s - t.value;
   }, 0);
+}
+function cardInvoiceMonths(transactions, card) {
+  const map = {};
+  transactions.forEach(t => {
+    if (t.cardId !== card.id) return;
+    if (t.installment && t.installment.current !== t.installment.liveAt) return;
+    const key = t.invoiceMonth || invoiceMonthKeyOf(t.date, card.closingDay);
+    map[key] = (map[key] || 0) - t.value;
+  });
+  return Object.entries(map).sort(([a],[b]) => b.localeCompare(a)).map(([key,total]) => ({ key, total }));
 }
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const toISO = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
@@ -145,18 +159,18 @@ function seedData() {
 }
 
 /* ============================================================
-   ARMAZENAMENTO COMPARTILHADO (jsonbin.io — plano grátis)
-   1. Crie uma conta em https://jsonbin.io
-   2. Crie um "Bin" novo com o conteúdo {} e copie o Bin ID
-   3. Em "API Keys", copie sua X-Master-Key
-   4. Cole os dois valores abaixo
+   ARMAZENAMENTO COMPARTILHADO (Firebase Realtime Database — plano grátis)
+   1. Crie um projeto em https://console.firebase.google.com
+   2. Build → Realtime Database → Criar banco de dados
+   3. Na aba Regras, publique { "rules": { ".read": true, ".write": true } }
+   4. Cole a URL do banco (topo da página do Realtime Database) abaixo
 ============================================================ */
-const JSONBIN_ID = "6a7d0166da38895dfedce2f3";
-const JSONBIN_KEY = "$2a$10$DiRKf0xhBDltF94YODaw7.MtLOXK7Bp8DyBSAZUi30zETV8zWQ2F2";
-const JSONBIN_URL = `https://api.jsonbin.io/v3/b/${JSONBIN_ID}`;
+const FIREBASE_DB_URL = "https://financeiro-casal-d5c0e-default-rtdb.firebaseio.com";
 
 // Adds fields introduced after a bin was first created, so older saved data
-// keeps working without the person having to reset anything.
+// keeps working without the person having to reset anything. Também cobre
+// campos que o Firebase devolve como null quando ficam vazios (arrays sem
+// itens não sobrevivem como [] lá, diferente do jsonbin.io antigo).
 function migrateData(d) {
   let next = d;
   if (!next.people) {
@@ -165,6 +179,10 @@ function migrateData(d) {
       { id: "p2", name: next.profile?.partnerName || "Pessoa 2", email: "", birthdate: "" },
     ] };
   }
+  if (!next.accounts) next = { ...next, accounts: [] };
+  if (!next.cards) next = { ...next, cards: [] };
+  if (!next.transactions) next = { ...next, transactions: [] };
+  if (!next.limits) next = { ...next, limits: [] };
   if (!next.tags) next = { ...next, tags: [] };
   if (!next.recurringTemplates) next = { ...next, recurringTemplates: [] };
   if (!next.customBanks) next = { ...next, customBanks: [] };
@@ -184,24 +202,32 @@ async function loadData() {
 // motivo (rede, etc), retorna null e quem chamou deve manter os dados atuais na tela.
 async function fetchCloud() {
   try {
-    const res = await fetch(`${JSONBIN_URL}/latest`, {
-      headers: { "X-Master-Key": JSONBIN_KEY },
-    });
+    const res = await fetch(`${FIREBASE_DB_URL}/.json`);
     if (res.ok) {
       const json = await res.json();
-      if (json && json.record && (json.record.people || json.record.profile)) return migrateData(json.record);
+      if (json && (json.people || json.profile)) return migrateData(json);
     }
   } catch (e) { console.error("Falha ao carregar dados da nuvem:", e); }
   return null;
 }
+// Retorna true/false em vez de engolir o erro — quem chama precisa saber
+// quando a gravação falhou pra avisar a pessoa em vez de fingir que salvou.
 async function saveData(data) {
   try {
-    await fetch(JSONBIN_URL, {
+    const res = await fetch(`${FIREBASE_DB_URL}/.json`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json", "X-Master-Key": JSONBIN_KEY },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-  } catch (e) { console.error("Falha ao salvar dados na nuvem:", e); }
+    if (!res.ok) {
+      console.error("Falha ao salvar dados na nuvem:", res.status, await res.text().catch(() => ""));
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error("Falha ao salvar dados na nuvem:", e);
+    return false;
+  }
 }
 
 /* ============================================================ ICONS (inline, no deps) */
@@ -326,7 +352,7 @@ function Inicio({ data, patch, goManage, goCards, setNotifOpen, onReload, syncin
   });
 
   const saldoGeral = data.accounts.reduce((s, a) => s + a.balance, 0);
-  const totalFaturas = data.cards.reduce((s, c) => s + cardInvoice(data.transactions, c.id), 0);
+  const totalFaturas = data.cards.reduce((s, c) => s + cardInvoice(data.transactions, c), 0);
   const unread = data.notifications.filter(n => !n.read).length;
 
   // Contas sem "dono" definido (cadastradas antes dessa função existir) aparecem
@@ -500,7 +526,7 @@ function Inicio({ data, patch, goManage, goCards, setNotifOpen, onReload, syncin
                 <div style={{ fontFamily: "Inter", fontSize: 12.5, fontWeight: 700, color: "var(--ink)", marginBottom: 6 }}>Fatura Atual {g.person ? g.person.name : ""}</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {g.cards.map(c => {
-                    const invoice = cardInvoice(data.transactions, c.id);
+                    const invoice = cardInvoice(data.transactions, c);
                     const disponivel = c.limit - invoice;
                     return (
                       <Card key={c.id} onClick={() => setFaturasOpen(true)} style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}>
@@ -522,7 +548,7 @@ function Inicio({ data, patch, goManage, goCards, setNotifOpen, onReload, syncin
 
       <Sheet open={faturasOpen} onClose={() => setFaturasOpen(false)} title="Faturas em aberto">
         {cardsByOwner.map(g => {
-          const subtotal = g.cards.reduce((s,c) => s + cardInvoice(data.transactions, c.id), 0);
+          const subtotal = g.cards.reduce((s,c) => s + cardInvoice(data.transactions, c), 0);
           return (
             <div key={g.person?.id || "sem-dono"} style={{ marginBottom: 16 }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom: 8 }}>
@@ -539,7 +565,7 @@ function Inicio({ data, patch, goManage, goCards, setNotifOpen, onReload, syncin
                       <div style={{ fontFamily: "Inter", fontSize: 13.5, fontWeight: 700 }}>{c.name}</div>
                       <div style={{ fontFamily: "Inter", fontSize: 11.5, color: "var(--muted-2)" }}>Vence dia {c.dueDay}</div>
                     </div>
-                    <div style={{ fontFamily: "IBM Plex Mono", fontSize: 15, fontWeight: 600, color: "var(--accent)", ...blurStyle }}>{brl(cardInvoice(data.transactions, c.id))}</div>
+                    <div style={{ fontFamily: "IBM Plex Mono", fontSize: 15, fontWeight: 600, color: "var(--accent)", ...blurStyle }}>{brl(cardInvoice(data.transactions, c))}</div>
                   </Card>
                 ))}
               </div>
@@ -581,6 +607,10 @@ function invoiceMonthOf(dateISO, closingDay) {
     if (month > 11) { month = 0; year += 1; }
   }
   return { year, month };
+}
+function invoiceMonthKeyOf(dateISO, closingDay) {
+  const { year, month } = invoiceMonthOf(dateISO, closingDay);
+  return `${year}-${String(month + 1).padStart(2, "0")}`;
 }
 function txDisplayMonth(t, cards) {
   if (t.invoiceMonth) {
@@ -1457,6 +1487,13 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, my
     patch(d => ({ ...d, cards: d.cards.filter(c => c.id !== cardEditDraft.id) }));
     setCardEditing(false); setCardEditDraft(null);
   }
+  function togglePaidMonth(cardId, monthKey) {
+    patch(d => ({ ...d, cards: d.cards.map(c => {
+      if (c.id !== cardId) return c;
+      const has = (c.paidMonths || []).includes(monthKey);
+      return { ...c, paidMonths: has ? c.paidMonths.filter(k => k !== monthKey) : [...(c.paidMonths || []), monthKey] };
+    }) }));
+  }
   const [cardDraft, setCardDraft] = useState({ name:"", bank:"nubank", limit:"", ownerId: myPersonId });
   const [newCat, setNewCat] = useState("");
   const [catType, setCatType] = useState("despesa");
@@ -1612,7 +1649,7 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, my
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:"var(--soft)", borderRadius:12, padding:"10px 12px" }}>
                       <div>
                         <div style={{ fontFamily:"Inter", fontSize:11, color:"var(--muted-2)", fontWeight:700 }}>Fatura atual · vence dia {c.dueDay}</div>
-                        <div style={{ fontFamily:"IBM Plex Mono", fontSize:16, fontWeight:600, color:"var(--accent)" }}>{brl(cardInvoice(data.transactions, c.id))}</div>
+                        <div style={{ fontFamily:"IBM Plex Mono", fontSize:16, fontWeight:600, color:"var(--accent)" }}>{brl(cardInvoice(data.transactions, c))}</div>
                       </div>
                     </div>
                   </Card>
@@ -1666,6 +1703,34 @@ function Conta({ data, patch, isDark, toggleTheme, initialScreen, myPersonId, my
               <Field label="Dia de vencimento"><input style={inputStyle} type="number" min="1" max="31" value={cardEditDraft.dueDay} onChange={e=>setCardEditDraft({...cardEditDraft,dueDay:e.target.value})} /></Field>
               <button onClick={saveCardEdit} style={primaryBtn}>Salvar alterações</button>
               <button onClick={removeCard} style={{ ...secondaryBtn, marginTop: 10 }}>Excluir cartão</button>
+
+              {(() => {
+                const liveCard = data.cards.find(c => c.id === cardEditDraft.id);
+                if (!liveCard) return null;
+                const months = cardInvoiceMonths(data.transactions, liveCard);
+                if (months.length === 0) return null;
+                return (
+                  <Field label="Faturas por mês">
+                    <div style={{ fontFamily:"Inter", fontSize:11.5, color:"var(--muted-2)", marginBottom:10 }}>
+                      Marque como paga a fatura de um mês pra tirar o valor dela do total mostrado no Início.
+                    </div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                      {months.map(m => {
+                        const isPaid = (liveCard.paidMonths || []).includes(m.key);
+                        return (
+                          <div key={m.key} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 12px", borderRadius:12, background:"var(--soft)" }}>
+                            <div>
+                              <div style={{ fontFamily:"Inter", fontSize:13, fontWeight:600, color:"var(--ink)" }}>{monthLabel(keyToDate(m.key, 1))}</div>
+                              <div style={{ fontFamily:"IBM Plex Mono", fontSize:12.5, color:"var(--muted)" }}>{brl(m.total)}</div>
+                            </div>
+                            <Pill active={isPaid} onClick={()=>togglePaidMonth(liveCard.id, m.key)}>{isPaid ? "Paga" : "Em aberto"}</Pill>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </Field>
+                );
+              })()}
             </div>
           )}
         </Sheet>
@@ -1802,6 +1867,7 @@ function FinanceApp() {
   const [pinValue, setPinValue] = useState("");
   const [pinError, setPinError] = useState(false);
   const [hideValues, setHideValues] = useState(true);
+  const [saveError, setSaveError] = useState(false);
   const [appRoot, setAppRoot] = useState(null);
   const appRootRef = useRef(null);
   const saveTimer = useRef(null);
@@ -1836,8 +1902,9 @@ function FinanceApp() {
     try {
       clearTimeout(saveTimer.current);
       if (pendingSaveRef.current) {
-        await saveData(pendingSaveRef.current);
-        pendingSaveRef.current = null;
+        const ok = await saveData(pendingSaveRef.current);
+        if (ok) { pendingSaveRef.current = null; setSaveError(false); }
+        else { setSaveError(true); return; } // não sobrescreve as mudanças locais ainda não salvas com a nuvem desatualizada
       }
       const fresh = await fetchCloud();
       if (fresh) setData(fresh);
@@ -1845,6 +1912,12 @@ function FinanceApp() {
     } finally {
       setSyncing(false);
     }
+  }
+
+  async function retrySave() {
+    if (!pendingSaveRef.current) { setSaveError(false); return; }
+    const ok = await saveData(pendingSaveRef.current);
+    if (ok) { pendingSaveRef.current = null; setSaveError(false); }
   }
 
   function toggleTheme() {
@@ -1879,7 +1952,11 @@ function FinanceApp() {
       const next = fn(prev);
       pendingSaveRef.current = next;
       clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => { saveData(next); pendingSaveRef.current = null; }, 400);
+      saveTimer.current = setTimeout(async () => {
+        const ok = await saveData(next);
+        if (ok) { pendingSaveRef.current = null; setSaveError(false); }
+        else { setSaveError(true); }
+      }, 400);
       return next;
     });
   }
@@ -1962,6 +2039,13 @@ function FinanceApp() {
     <div ref={node => { if (node && appRootRef.current !== node) { appRootRef.current = node; setAppRoot(node); } }} className="fin-app" data-theme={isDark ? "dark" : "light"} style={{ fontFamily: "Inter, sans-serif", color: "var(--ink)", width: "100%", maxWidth: 430, margin: "0 auto", background: "var(--bg)", height: "100dvh", paddingTop: "env(safe-area-inset-top)", display: "flex", flexDirection: "column", position: "relative", overflow: "hidden", boxShadow: "0 20px 60px -20px rgba(16,24,40,0.4)" }}>
       <style>{FONT_IMPORT}{THEME_CSS}{`* { box-sizing: border-box; } select { -webkit-appearance:none; appearance:none; }`}</style>
       <PortalContext.Provider value={appRoot}>
+
+      {saveError && (
+        <div style={{ position: "relative", zIndex: 50, flexShrink: 0, background: "#A13D46", color: "#fff", padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, fontFamily: "Inter", fontSize: 12.5 }}>
+          <div style={{ flex: 1 }}>Não deu pra salvar sua última alteração na nuvem (pode ter estourado o limite de espaço). Ela pode se perder se você fechar o app.</div>
+          <button onClick={retrySave} style={{ background: "#fff", color: "#A13D46", border: "none", borderRadius: 8, padding: "7px 12px", fontFamily: "Inter", fontWeight: 700, fontSize: 12, cursor: "pointer", flexShrink: 0 }}>Tentar de novo</button>
+        </div>
+      )}
 
       <div style={{ position: "relative", flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", WebkitOverflowScrolling: "touch" }}>
         {tab === "inicio" && <Inicio data={data} patch={patch} goManage={() => setTab("conta_conexoes")} goCards={() => setTab("conta_cartoes")} setNotifOpen={setNotifOpen} onReload={reloadFromCloud} syncing={syncing} lastSync={lastSync} isDark={isDark} toggleTheme={toggleTheme} hideValues={hideValues} toggleHideValues={() => setHideValues(v => !v)} myPersonId={myPersonId} myPerson={myPerson} partnerName={partner?.name} />}
